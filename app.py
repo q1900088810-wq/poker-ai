@@ -2,111 +2,131 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
+POSITIONS_9MAX = ["UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB","BB"]
+
 # =========================
-# 🃏 手牌强度（真实玩家模型）
+# 🧠 初始化牌桌
 # =========================
-def hand_strength(hand, board):
+def create_table(seats=9):
+    table = []
+
+    for i in range(seats):
+        table.append({
+            "id": i,
+            "pos": POSITIONS_9MAX[i],
+            "stack": 1000,
+            "status": "active",
+            "bet": 0
+        })
+
+    return table
+
+# =========================
+# 🧠 手牌强度（简化）
+# =========================
+def strength(hand):
     hand = hand.upper()
 
-    base = 0.4
-
-    # 高牌
     if "A" in hand and "K" in hand:
-        base = 0.85
-    elif "A" in hand:
-        base = 0.6
-    elif hand[0] == hand[2]:  # pocket pair
-        base = 0.7
-    elif "Q" in hand or "J" in hand:
-        base = 0.5
-
-    # 公共牌影响
-    board = board.upper()
-
-    if len(board.split()) >= 3:
-        base += 0.05
-
-    if "A" in board:
-        base -= 0.05  # 公共A降低相对强度
-
-    return max(0.05, min(0.95, base))
+        return 0.85
+    if hand[0] == hand[2]:
+        return 0.75
+    if "A" in hand:
+        return 0.6
+    return 0.4
 
 # =========================
-# 🧠 对手行为影响（不读牌，只看行为）
+# 🧠 决策逻辑（核心）
 # =========================
-def opponent_pressure(action):
-    if action == "raise":
-        return 0.8
-    if action == "call":
-        return 0.5
+def decide(strength, to_call):
+
+    if strength > 0.8:
+        return "raise"
+    if strength > 0.55 and to_call <= 50:
+        return "call"
+    return "fold"
+
+# =========================
+# 🧠 单个玩家行动
+# =========================
+def act(player, hand_strength, to_call):
+
+    if player["status"] != "active":
+        return player, 0, None
+
+    action = decide(hand_strength, to_call)
+
     if action == "fold":
-        return 0.2
-    return 0.5
+        player["status"] = "fold"
+        return player, 0, "fold"
+
+    if action == "call":
+        pay = min(to_call, player["stack"])
+        player["stack"] -= pay
+        player["bet"] += pay
+        return player, pay, "call"
+
+    if action == "raise":
+        raise_amt = 100
+        total = to_call + raise_amt
+        pay = min(total, player["stack"])
+        player["stack"] -= pay
+        player["bet"] += pay
+        return player, pay, "raise"
 
 # =========================
-# 🎯 EV模型（核心）
+# 🧠 一轮完整行动（顺序推进）
 # =========================
-def ev_model(strength, pressure):
+def run_round(table, hand):
 
-    winrate = strength - pressure * 0.2
-    winrate = max(0.05, min(0.95, winrate))
+    pot = 0
+    current_bet = 50
 
-    ev_call = winrate * 100
-    ev_raise = winrate * 140 - (1 - winrate) * 80
+    log = []
 
-    return winrate, ev_call, ev_raise
+    for p in table:
 
-# =========================
-# 🎯 GTO决策
-# =========================
-def gto(ev_call, ev_raise):
-    if ev_raise > ev_call:
-        return "RAISE"
-    if ev_call > 45:
-        return "CALL"
-    return "FOLD"
+        s = strength(hand)
 
-# =========================
-# 🧠 exploit修正（行为博弈）
-# =========================
-def adjust(base, action):
+        to_call = current_bet - p["bet"]
 
-    if action == "raise" and base == "CALL":
-        return "CALL（防诈唬）"
+        p, paid, action = act(p, s, to_call)
 
-    if action == "raise" and base == "FOLD":
-        return "FOLD"
+        pot += paid
 
-    if action == "call" and base == "RAISE":
-        return "价值加注"
+        if action == "raise":
+            current_bet = p["bet"]
 
-    return base
+        log.append({
+            "位置": p["pos"],
+            "动作": action,
+            "下注": paid,
+            "状态": p["status"]
+        })
+
+    return table, pot, current_bet, log
 
 # =========================
-# 🧠 AI核心（真实玩家版）
+# 🧠 AI入口
 # =========================
-def ai(hand, board, opp_action):
+def ai(hand, board, seats):
 
-    strength = hand_strength(hand, board)
+    table = create_table(seats)
 
-    pressure = opponent_pressure(opp_action)
+    table, pot, current_bet, log = run_round(table, hand)
 
-    winrate, ev_call, ev_raise = ev_model(strength, pressure)
-
-    base = gto(ev_call, ev_raise)
-
-    final = adjust(base, opp_action)
+    active = len([p for p in table if p["status"] == "active"])
+    folded = len([p for p in table if p["status"] == "fold"])
 
     return {
-        "手牌": hand,
+        "玩家数": seats,
         "公共牌": board,
-        "手牌强度": round(strength,2),
-        "胜率": round(winrate,2),
-        "EV跟注": round(ev_call,2),
-        "EV加注": round(ev_raise,2),
-        "对手动作": opp_action,
-        "GTO决策": base,
-        "最终建议": final
+        "底池": pot,
+        "当前下注": current_bet,
+        "存活玩家": active,
+        "弃牌玩家": folded,
+        "行动日志": log,
+        "状态": "9人实时位置系统"
     }
 
 # =========================
@@ -117,12 +137,12 @@ def api():
 
     hand = request.args.get("hand","A♠ K♠")
     board = request.args.get("board","Q♥ J♦ 10♣")
-    opp_action = request.args.get("action","call")
+    seats = int(request.args.get("seats",9))
 
-    return jsonify(ai(hand, board, opp_action))
+    return jsonify(ai(hand, board, seats))
 
 # =========================
-# 🌐 UI
+# 🌐 UI（实时牌桌）
 # =========================
 @app.route("/")
 def home():
@@ -132,50 +152,51 @@ def home():
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
     body{background:#111;color:#fff;font-family:Arial;text-align:center;padding:20px}
-    input,select{width:90%;padding:12px;margin:8px}
+    input{width:90%;padding:12px;margin:6px}
     button{padding:12px;background:#00c853;border:0;color:#fff}
-    .r{white-space:pre-line;margin-top:20px}
+    .log{white-space:pre-line;text-align:left;margin-top:20px}
     </style>
     </head>
 
     <body>
 
-    <h2>🧠 德州真实玩家AI</h2>
+    <h2>🧠 9人实时位置德州系统</h2>
 
     <input id="hand" placeholder="手牌（A♠ K♠）">
-    <input id="board" placeholder="公共牌（Q♥ J♦ 10♣）">
+    <input id="board" placeholder="公共牌">
+    <input id="seats" placeholder="人数（2-9）" value="9">
 
-    <select id="action">
-        <option value="raise">对手加注</option>
-        <option value="call">对手跟注</option>
-        <option value="fold">对手弃牌</option>
-    </select>
+    <button onclick="run()">开始一轮</button>
 
-    <button onclick="run()">分析</button>
-
-    <div class="r" id="res"></div>
+    <div class="log" id="res"></div>
 
     <script>
+
     function run(){
         let h=document.getElementById("hand").value;
         let b=document.getElementById("board").value;
-        let a=document.getElementById("action").value;
+        let s=document.getElementById("seats").value;
 
-        fetch(`/ai?hand=${h}&board=${b}&action=${a}`)
+        fetch(`/ai?hand=${h}&board=${b}&seats=${s}`)
         .then(r=>r.json())
         .then(d=>{
-            document.getElementById("res").innerText =
-            "手牌: "+d["手牌"]+"\n"+
-            "公共牌: "+d["公共牌"]+"\n"+
-            "手牌强度: "+d["手牌强度"]+"\n"+
-            "胜率: "+d["胜率"]+"\n"+
-            "EV跟注: "+d["EV跟注"]+"\n"+
-            "EV加注: "+d["EV加注"]+"\n"+
-            "对手动作: "+d["对手动作"]+"\n"+
-            "GTO: "+d["GTO决策"]+"\n"+
-            "最终: "+d["最终建议"];
+
+            let log = "底池: "+d.底池+"\n";
+            log += "当前下注: "+d.当前下注+"\n";
+            log += "存活: "+d.存活玩家+" / 弃牌: "+d.弃牌玩家+"\n\n";
+
+            log += "行动顺序:\n";
+
+            d.行动日志.forEach(x=>{
+                log += x["位置"]+" → "+x["动作"]+" ("+x["下注"]+")\n";
+            });
+
+            log += "\n状态: "+d.状态;
+
+            document.getElementById("res").innerText = log;
         })
     }
+
     </script>
 
     </body>
