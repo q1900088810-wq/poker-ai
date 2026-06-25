@@ -6,7 +6,7 @@ app = Flask(__name__)
 POSITIONS = ["BTN","SB","BB","UTG","UTG+1","MP","MP+1","CO","HJ"]
 
 # =========================
-# 🧠 初始化9人桌
+# 🧠 初始化牌桌
 # =========================
 def create_table():
     table = []
@@ -15,52 +15,98 @@ def create_table():
         table.append({
             "seat": i,
             "pos": POSITIONS[i],
-            "status": "active",   # active / fold / allin
-            "hand": random.choice(["A K","Q Q","J T","9 9","7 2"]),
-            "action": None
+            "stack": 1000,
+            "status": "active",
+            "hand": random.choice(["A K","Q Q","J J","9 9","7 2"]),
+            "bet": 0
         })
 
     return table
 
 # =========================
-# 🧠 简单AI决策
+# 🧠 简单手牌强度
 # =========================
-def decide(hand):
+def strength(hand):
     if "A" in hand and "K" in hand:
-        return "raise"
+        return 0.85
     if hand[0] == hand[2]:
+        return 0.75
+    return 0.4
+
+# =========================
+# 🎯 决策系统
+# =========================
+def decide(strength, to_call):
+    if strength > 0.8:
+        return "raise"
+    if strength > 0.5 and to_call <= 50:
         return "call"
     return "fold"
 
 # =========================
-# 🧠 模拟一轮行动
+# 🧠 一轮下注逻辑
 # =========================
-def run_round(table):
+def betting_round(table, pot, current_bet):
+
     for p in table:
-        if p["status"] == "active":
-            action = decide(p["hand"])
 
-            if action == "fold":
-                p["status"] = "fold"
-            elif action == "raise":
-                p["status"] = "active"
-            else:
-                p["status"] = "active"
+        if p["status"] != "active":
+            continue
 
-            p["action"] = action
+        s = strength(p["hand"])
 
-    return table
+        to_call = current_bet - p["bet"]
+
+        action = decide(s, to_call)
+
+        if action == "fold":
+            p["status"] = "fold"
+
+        elif action == "call":
+            pay = min(to_call, p["stack"])
+            p["stack"] -= pay
+            p["bet"] += pay
+            pot += pay
+
+        elif action == "raise":
+            raise_amt = 100
+            total = to_call + raise_amt
+
+            pay = min(total, p["stack"])
+            p["stack"] -= pay
+            p["bet"] += pay
+            pot += pay
+
+            current_bet = p["bet"]
+
+    return table, pot, current_bet
 
 # =========================
-# 🧠 状态统计
+# 🧠 游戏一手（preflop）
 # =========================
-def summary(table):
-    active = len([p for p in table if p["status"] == "active"])
-    fold = len([p for p in table if p["status"] == "fold"])
+def play_hand():
+
+    table = create_table()
+
+    pot = 0
+    current_bet = 50  # SB/BB简化
+
+    # 小盲大盲强制下注
+    table[1]["stack"] -= 25
+    table[1]["bet"] = 25
+    table[2]["stack"] -= 50
+    table[2]["bet"] = 50
+
+    pot += 75
+    current_bet = 50
+
+    # 一轮下注
+    table, pot, current_bet = betting_round(table, pot, current_bet)
 
     return {
-        "active": active,
-        "folded": fold
+        "table": table,
+        "pot": pot,
+        "current_bet": current_bet
     }
 
 # =========================
@@ -68,16 +114,10 @@ def summary(table):
 # =========================
 @app.route("/ai")
 def ai():
-    table = create_table()
-    table = run_round(table)
-
-    return jsonify({
-        "table": table,
-        "summary": summary(table)
-    })
+    return jsonify(play_hand())
 
 # =========================
-# 🌐 UI（9人桌可视化）
+# 🌐 UI（真实牌桌）
 # =========================
 @app.route("/")
 def home():
@@ -123,10 +163,11 @@ def home():
 
     <body>
 
-    <h2>🧠 9人桌动态扑克UI</h2>
+    <h2>🧠 9人桌下注系统（筹码版）</h2>
 
     <button onclick="run()">下一手</button>
 
+    <div id="pot"></div>
     <div class="table" id="table"></div>
 
     <script>
@@ -136,6 +177,9 @@ def home():
         .then(r=>r.json())
         .then(d=>{
 
+            document.getElementById("pot").innerHTML =
+            "<h3>底池: " + d.pot + "</h3>";
+
             let html = "";
 
             d.table.forEach(p=>{
@@ -143,8 +187,9 @@ def home():
                 <div class="player ${p.status}">
                     <b>${p.pos}</b><br>
                     ${p.hand}<br>
+                    筹码: ${p.stack}<br>
                     状态: ${p.status}<br>
-                    动作: ${p.action}
+                    已下注: ${p.bet}
                 </div>
                 `;
             });
