@@ -2,39 +2,62 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# =========================
-# 🧠 对手模型（Level 9核心）
-# =========================
-class Opponent:
-    def __init__(self):
-        self.aggression = 0.7
-        self.bluff_rate = 0.3
-        self.fold_rate = 0.6
-
-def update_opponent(opponent, action):
-    if action == "RAISE":
-        opponent.aggression += 0.05
-    if action == "FOLD":
-        opponent.fold_rate += 0.05
-
-# =========================
-# 🎯 GTO基础策略
-# =========================
-def gto(ev_call, ev_raise):
+# ================= AI（先基础版，后面升级） =================
+def ai(ev_call, ev_raise):
     if ev_raise > ev_call:
         return "RAISE"
     elif ev_call > 0:
         return "CALL"
     return "FOLD"
 
-# =========================
-# 🔍 剥削信号检测
-# =========================
-def detect_exploit(opponent):
-    signals = []
+# ================= 🧠 手机App界面 =================
+@app.route("/")
+def home():
+    return """
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>德州AI</title>
+        <style>
+            body { font-family: Arial; text-align:center; padding:20px; background:#111; color:white; }
+            input { width:90%; padding:12px; margin:10px; font-size:18px; }
+            button { padding:12px 25px; font-size:18px; background:#00c853; color:white; border:none; }
+            .res { margin-top:20px; font-size:26px; font-weight:bold; color:#00e676; }
+        </style>
+    </head>
 
-    if opponent.fold_rate > 0.65:
-        signals.append("EXPLOIT_FOLD_HEAVY")
+    <body>
+        <h2>🧠 德州AI Level 9</h2>
 
-    if opponent.bluff_rate > 0.35:
-        signals.append("CALL_MORE
+        <input id="call" placeholder="EV Call">
+        <input id="raise" placeholder="EV Raise">
+
+        <br>
+        <button onclick="run()">分析</button>
+
+        <div class="res" id="res"></div>
+
+        <script>
+            function run(){
+                let c = document.getElementById("call").value;
+                let r = document.getElementById("raise").value;
+
+                fetch(`/ai?ev_call=${c}&ev_raise=${r}`)
+                .then(r=>r.json())
+                .then(d=>{
+                    document.getElementById("res").innerText =
+                    "👉 决策：" + d.action;
+                })
+            }
+        </script>
+    </body>
+    </html>
+    """
+
+@app.route("/ai")
+def api():
+    ev_call = float(request.args.get("ev_call",0))
+    ev_raise = float(request.args.get("ev_raise",0))
+    return jsonify({"action": ai(ev_call, ev_raise)})
+
+app.run(host="0.0.0.0", port=10000)
