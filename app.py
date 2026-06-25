@@ -3,100 +3,110 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 # =========================
-# 🃏 解析牌（带花色）
-# =========================
-def parse(cards):
-    return [c.strip().upper() for c in cards.split() if c.strip()]
-
-# =========================
-# 🧠 手牌强度（含花色思维）
+# 🃏 手牌强度（真实玩家模型）
 # =========================
 def hand_strength(hand, board):
-    h = parse(hand)
-    b = parse(board)
-
-    all_cards = h + b
+    hand = hand.upper()
 
     base = 0.4
 
     # 高牌
-    if any(c[0] == "A" for c in h):
-        base += 0.1
-
     if "A" in hand and "K" in hand:
-        base += 0.2
+        base = 0.85
+    elif "A" in hand:
+        base = 0.6
+    elif hand[0] == hand[2]:  # pocket pair
+        base = 0.7
+    elif "Q" in hand or "J" in hand:
+        base = 0.5
 
-    # 对子
-    if len(set([c[0] for c in h])) < len(h):
-        base += 0.2
+    # 公共牌影响
+    board = board.upper()
 
-    # 公共牌增强
-    if len(b) >= 3:
-        base += 0.1
+    if len(board.split()) >= 3:
+        base += 0.05
 
-    return min(0.95, base)
+    if "A" in board:
+        base -= 0.05  # 公共A降低相对强度
+
+    return max(0.05, min(0.95, base))
 
 # =========================
-# 🧠 根据下注行为推 range（核心）
+# 🧠 对手行为影响（不读牌，只看行为）
 # =========================
-def estimate_range(action, street, board_texture):
-
+def opponent_pressure(action):
     if action == "raise":
-
-        if "A" in board_texture:
-            return "强牌范围（顶对+ / AK / AA）"
-        else:
-            return "宽加注范围（诈唬 + 强牌混合）"
-
+        return 0.8
     if action == "call":
-        return "中等范围（对子 / 听牌 / 弱顶对）"
-
+        return 0.5
     if action == "fold":
-        return "弱范围（空气牌 / 无连接）"
-
-    return "未知范围"
-
-# =========================
-# 🧠 GTO + exploit决策
-# =========================
-def decision(strength, opp_action):
-
-    if opp_action == "raise":
-        if strength > 0.7:
-            return "跟注（抓范围）"
-        return "弃牌"
-
-    if opp_action == "call":
-        if strength > 0.6:
-            return "价值加注"
-        return "过牌"
-
-    return "过牌"
+        return 0.2
+    return 0.5
 
 # =========================
-# 🧠 AI核心（真正局面版）
+# 🎯 EV模型（核心）
+# =========================
+def ev_model(strength, pressure):
+
+    winrate = strength - pressure * 0.2
+    winrate = max(0.05, min(0.95, winrate))
+
+    ev_call = winrate * 100
+    ev_raise = winrate * 140 - (1 - winrate) * 80
+
+    return winrate, ev_call, ev_raise
+
+# =========================
+# 🎯 GTO决策
+# =========================
+def gto(ev_call, ev_raise):
+    if ev_raise > ev_call:
+        return "RAISE"
+    if ev_call > 45:
+        return "CALL"
+    return "FOLD"
+
+# =========================
+# 🧠 exploit修正（行为博弈）
+# =========================
+def adjust(base, action):
+
+    if action == "raise" and base == "CALL":
+        return "CALL（防诈唬）"
+
+    if action == "raise" and base == "FOLD":
+        return "FOLD"
+
+    if action == "call" and base == "RAISE":
+        return "价值加注"
+
+    return base
+
+# =========================
+# 🧠 AI核心（真实玩家版）
 # =========================
 def ai(hand, board, opp_action):
 
     strength = hand_strength(hand, board)
 
-    board_cards = parse(board)
+    pressure = opponent_pressure(opp_action)
 
-    range_read = estimate_range(
-        opp_action,
-        "flop",
-        "".join(board_cards)
-    )
+    winrate, ev_call, ev_raise = ev_model(strength, pressure)
 
-    action = decision(strength, opp_action)
+    base = gto(ev_call, ev_raise)
+
+    final = adjust(base, opp_action)
 
     return {
         "手牌": hand,
         "公共牌": board,
-        "手牌强度": round(strength, 2),
+        "手牌强度": round(strength,2),
+        "胜率": round(winrate,2),
+        "EV跟注": round(ev_call,2),
+        "EV加注": round(ev_raise,2),
         "对手动作": opp_action,
-        "推测对手范围": range_read,
-        "建议动作": action
+        "GTO决策": base,
+        "最终建议": final
     }
 
 # =========================
@@ -107,12 +117,12 @@ def api():
 
     hand = request.args.get("hand","A♠ K♠")
     board = request.args.get("board","Q♥ J♦ 10♣")
-    opp_action = request.args.get("action","raise")
+    opp_action = request.args.get("action","call")
 
     return jsonify(ai(hand, board, opp_action))
 
 # =========================
-# 🌐 UI（重点：真实牌桌信息）
+# 🌐 UI
 # =========================
 @app.route("/")
 def home():
@@ -122,7 +132,7 @@ def home():
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
     body{background:#111;color:#fff;font-family:Arial;text-align:center;padding:20px}
-    input{width:90%;padding:12px;margin:8px}
+    input,select{width:90%;padding:12px;margin:8px}
     button{padding:12px;background:#00c853;border:0;color:#fff}
     .r{white-space:pre-line;margin-top:20px}
     </style>
@@ -130,7 +140,7 @@ def home():
 
     <body>
 
-    <h2>🧠 德州局面分析AI（范围推理版）</h2>
+    <h2>🧠 德州真实玩家AI</h2>
 
     <input id="hand" placeholder="手牌（A♠ K♠）">
     <input id="board" placeholder="公共牌（Q♥ J♦ 10♣）">
@@ -157,10 +167,13 @@ def home():
             document.getElementById("res").innerText =
             "手牌: "+d["手牌"]+"\n"+
             "公共牌: "+d["公共牌"]+"\n"+
-            "强度: "+d["手牌强度"]+"\n"+
+            "手牌强度: "+d["手牌强度"]+"\n"+
+            "胜率: "+d["胜率"]+"\n"+
+            "EV跟注: "+d["EV跟注"]+"\n"+
+            "EV加注: "+d["EV加注"]+"\n"+
             "对手动作: "+d["对手动作"]+"\n"+
-            "推测范围: "+d["推测对手范围"]+"\n"+
-            "建议: "+d["建议动作"];
+            "GTO: "+d["GTO决策"]+"\n"+
+            "最终: "+d["最终建议"];
         })
     }
     </script>
