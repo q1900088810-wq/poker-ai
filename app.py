@@ -5,142 +5,79 @@ app = Flask(__name__)
 
 POSITIONS = ["BTN","SB","BB","UTG","UTG+1","MP","MP+1","CO","HJ"]
 
-ACTIONS = ["FOLD", "CALL", "RAISE"]
-
 # =========================
-# 🧠 9人桌初始化
+# 🧠 初始化9人桌
 # =========================
 def create_table():
     table = []
+
     for i in range(9):
         table.append({
             "seat": i,
-            "position": POSITIONS[i],
-            "active": True,
-            "aggression": random.uniform(0.3, 0.9),
-            "bluff": random.uniform(0.1, 0.5)
+            "pos": POSITIONS[i],
+            "status": "active",   # active / fold / allin
+            "hand": random.choice(["A K","Q Q","J T","9 9","7 2"]),
+            "action": None
         })
+
     return table
 
 # =========================
-# 🧠 公共牌解析
+# 🧠 简单AI决策
 # =========================
-def parse_cards(text):
-    return [c.upper() for c in text.split() if c.strip()]
-
-# =========================
-# 🧠 手牌强度（简化）
-# =========================
-def strength(hand, board):
-    cards = parse_cards(hand) + parse_cards(board)
-
-    if len(cards) == 0:
-        return 0.3
-
-    score = 0.4
-
-    ranks = "23456789TJQKA"
-
-    for c in cards:
-        if c[0] in "AK":
-            score += 0.05
-
-    if len(board.split()) >= 3:
-        score += 0.1  # flop bonus
-
-    if len(board.split()) >= 4:
-        score += 0.05
-
-    return min(0.95, score)
+def decide(hand):
+    if "A" in hand and "K" in hand:
+        return "raise"
+    if hand[0] == hand[2]:
+        return "call"
+    return "fold"
 
 # =========================
-# 🧠 9人动态影响
+# 🧠 模拟一轮行动
 # =========================
-def table_pressure(table):
-    active = [p for p in table if p["active"]]
+def run_round(table):
+    for p in table:
+        if p["status"] == "active":
+            action = decide(p["hand"])
 
-    agg = sum(p["aggression"] for p in active) / len(active)
+            if action == "fold":
+                p["status"] = "fold"
+            elif action == "raise":
+                p["status"] = "active"
+            else:
+                p["status"] = "active"
 
-    bluff = sum(p["bluff"] for p in active) / len(active)
+            p["action"] = action
 
-    return agg, bluff, len(active)
-
-# =========================
-# 🎯 EV模型（动态）
-# =========================
-def ev_calc(strength, agg, bluff, players):
-    win = strength + bluff*0.2 - agg*0.15 - (players-2)*0.02
-
-    win = max(0.05, min(0.95, win))
-
-    return win*100, win*140
+    return table
 
 # =========================
-# 🎯 动态GTO
+# 🧠 状态统计
 # =========================
-def gto(ev1, ev2):
-    if ev2 > ev1:
-        return "RAISE"
-    if ev1 > 45:
-        return "CALL"
-    return "FOLD"
-
-# =========================
-# 🔍 动态exploit
-# =========================
-def exploit(agg, bluff):
-    s = []
-
-    if agg > 0.65:
-        s.append("对手整体激进")
-
-    if bluff > 0.35:
-        s.append("桌面诈唬偏高")
-
-    return s
-
-# =========================
-# 🧠 AI核心（9人桌动态版）
-# =========================
-def ai_engine(hand, board):
-    table = create_table()
-
-    agg, bluff, players = table_pressure(table)
-
-    s = strength(hand, board)
-
-    ev1, ev2 = ev_calc(s, agg, bluff, players)
-
-    base = gto(ev1, ev2)
-
-    signals = exploit(agg, bluff)
-
-    # 🟣 动态策略修正（关键）
-    if "桌面诈唬偏高" in signals and base == "CALL":
-        final = "CALL（抓诈唬）"
-    elif "对手整体激进" in signals and base == "RAISE":
-        final = "SLOW PLAY"
-    else:
-        final = {
-            "RAISE":"加注",
-            "CALL":"跟注",
-            "FOLD":"弃牌"
-        }[base]
+def summary(table):
+    active = len([p for p in table if p["status"] == "active"])
+    fold = len([p for p in table if p["status"] == "fold"])
 
     return {
-        "桌面人数": players,
-        "手牌强度": round(s,2),
-        "桌面激进度": round(agg,2),
-        "桌面诈唬率": round(bluff,2),
-        "EV跟注": round(ev1,2),
-        "EV加注": round(ev2,2),
-        "GTO": base,
-        "最终决策": final,
-        "状态": "动态9人桌模型"
+        "active": active,
+        "folded": fold
     }
 
 # =========================
-# 🌐 UI（手机）
+# 🌐 API
+# =========================
+@app.route("/ai")
+def ai():
+    table = create_table()
+    table = run_round(table)
+
+    return jsonify({
+        "table": table,
+        "summary": summary(table)
+    })
+
+# =========================
+# 🌐 UI（9人桌可视化）
 # =========================
 @app.route("/")
 def home():
@@ -149,56 +86,80 @@ def home():
     <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-    body{background:#111;color:#fff;text-align:center;font-family:Arial;padding:20px}
-    input{width:90%;padding:12px;margin:8px;font-size:16px}
-    button{padding:12px 20px;background:#00c853;color:#fff;border:0}
-    .r{margin-top:20px;white-space:pre-line}
+
+    body{
+        background:#111;
+        color:white;
+        font-family:Arial;
+        text-align:center;
+    }
+
+    .table{
+        display:grid;
+        grid-template-columns:repeat(3,1fr);
+        gap:10px;
+        margin-top:20px;
+    }
+
+    .player{
+        padding:10px;
+        border:1px solid #444;
+        border-radius:10px;
+    }
+
+    .active{color:#00ff7f}
+    .fold{color:#ff4444}
+
+    button{
+        padding:12px;
+        margin-top:10px;
+        background:#00c853;
+        border:0;
+        color:white;
+    }
+
     </style>
     </head>
 
     <body>
-    <h2>🧠 9人桌动态德州AI</h2>
 
-    <input id="hand" placeholder="手牌（A K / AA / QQ）">
-    <input id="board" placeholder="公共牌（Q J 10）">
+    <h2>🧠 9人桌动态扑克UI</h2>
 
-    <button onclick="run()">分析</button>
+    <button onclick="run()">下一手</button>
 
-    <div class="r" id="res"></div>
+    <div class="table" id="table"></div>
 
     <script>
-    function run(){
-        let h=document.getElementById("hand").value;
-        let b=document.getElementById("board").value;
 
-        fetch(`/ai?hand=${h}&board=${b}`)
+    function run(){
+        fetch('/ai')
         .then(r=>r.json())
         .then(d=>{
-            document.getElementById("res").innerText =
-            "人数: "+d["桌面人数"]+"\n"+
-            "强度: "+d["手牌强度"]+"\n"+
-            "EV跟注: "+d["EV跟注"]+"\n"+
-            "EV加注: "+d["EV加注"]+"\n"+
-            "GTO: "+d["GTO"]+"\n"+
-            "最终: "+d["最终决策"]+"\n"+
-            "状态: "+d["状态"];
-        })
+
+            let html = "";
+
+            d.table.forEach(p=>{
+                html += `
+                <div class="player ${p.status}">
+                    <b>${p.pos}</b><br>
+                    ${p.hand}<br>
+                    状态: ${p.status}<br>
+                    动作: ${p.action}
+                </div>
+                `;
+            });
+
+            document.getElementById("table").innerHTML = html;
+        });
     }
+
+    run();
+
     </script>
 
     </body>
     </html>
     """
-
-# =========================
-# 🌐 API
-# =========================
-@app.route("/ai")
-def api():
-    hand = request.args.get("hand","A K")
-    board = request.args.get("board","")
-
-    return jsonify(ai_engine(hand, board))
 
 # =========================
 # 🚀 启动
