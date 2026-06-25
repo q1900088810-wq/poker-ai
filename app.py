@@ -1,125 +1,110 @@
 from flask import Flask, request, jsonify
 import random
+import numpy as np
 
 app = Flask(__name__)
 
 # =========================
-# 🧠 对手模型（2-9人桌通用）
+# 🧠 神经网络（极简版）
 # =========================
-class Opponent:
-    def __init__(self, players=6):
-        self.players = players
-        self.aggression = random.uniform(0.4, 0.9)
-        self.bluff_rate = random.uniform(0.1, 0.5)
-        self.fold_rate = random.uniform(0.3, 0.8)
+class SimpleNN:
+    def __init__(self):
+        self.weights = np.random.randn(3, 3) * 0.1
+
+    def forward(self, x):
+        return np.dot(x, self.weights)
+
+    def train(self, x, y, lr=0.01):
+        pred = self.forward(x)
+        grad = (pred - y)
+        self.weights -= lr * np.outer(x, grad)
 
 # =========================
-# 🃏 手牌强度评分（核心升级）
+# 🧠 CFR记忆库
 # =========================
-def hand_strength(hand):
+regret_memory = []
+strategy_memory = []
+
+regret_net = SimpleNN()
+strategy_net = SimpleNN()
+
+ACTIONS = ["FOLD", "CALL", "RAISE"]
+
+# =========================
+# 🃏 手牌特征
+# =========================
+def hand_features(hand):
     hand = hand.upper()
 
-    if "AA" in hand:
-        return 0.95
-    if "KK" in hand:
-        return 0.9
-    if "QQ" in hand:
-        return 0.85
-    if "AK" in hand:
-        return 0.8
-    if "AQ" in hand:
-        return 0.75
-    if "JJ" in hand:
-        return 0.7
-    if "TT" in hand:
-        return 0.65
+    f1 = 1 if "A" in hand else 0
+    f2 = 1 if "K" in hand else 0
+    f3 = 1 if hand.count(hand[0]) > 1 else 0
 
-    if "A" in hand:
-        return 0.55
-
-    return 0.35
+    return np.array([f1, f2, f3])
 
 # =========================
-# 🎯 EV简化模型
+# 🎯 策略输出
 # =========================
-def calc_ev(strength, opp):
-    win_rate = strength
-
-    win_rate += opp.bluff_rate * 0.2
-    win_rate -= opp.aggression * 0.15
-    win_rate = max(0.05, min(0.95, win_rate))
-
-    ev_call = win_rate * 100
-    ev_raise = win_rate * 130 - (1 - win_rate) * 80
-
-    return ev_call, ev_raise, win_rate
+def softmax(x):
+    e = np.exp(x - np.max(x))
+    return e / e.sum()
 
 # =========================
-# 🎯 GTO基础决策
+# 🧠 CFR训练样本生成
 # =========================
-def gto(ev_call, ev_raise):
-    if ev_raise > ev_call:
-        return "RAISE"
-    elif ev_call > 40:
-        return "CALL"
-    return "FOLD"
+def generate_cfr_sample(x):
+    base = regret_net.forward(x)
 
-# =========================
-# 🔍 exploit检测
-# =========================
-def detect_exploit(opp):
-    signals = []
+    probs = softmax(base)
 
-    if opp.fold_rate > 0.65:
-        signals.append("对手容易弃牌")
-
-    if opp.bluff_rate > 0.35:
-        signals.append("对手喜欢诈唬")
-
-    if opp.aggression > 0.75:
-        signals.append("对手很激进")
-
-    return signals
+    return probs
 
 # =========================
-# ⚡ exploit策略
+# 🧠 self-play训练
 # =========================
-def exploit_strategy(base, signals):
-    if "对手容易弃牌" in signals:
-        return "加注（轻压制）"
-    if "对手喜欢诈唬" in signals:
-        return "跟注（抓诈唬）"
-    if "对手很激进" in signals:
-        return "慢打强牌"
-    return base
+def train_step(x):
+    probs = generate_cfr_sample(x)
+
+    # 假设 reward（简化）
+    reward = np.array([
+        -0.2,
+        0.5,
+        1.0
+    ])
+
+    target = probs + 0.1 * reward
+
+    regret_net.train(x, target)
+    strategy_net.train(x, probs)
+
+    return probs
 
 # =========================
-# 🧠 主AI（完整版）
+# 🧠 AI决策
 # =========================
-def ai_engine(hand, players):
-    opp = Opponent(players)
+def ai_engine(hand):
+    x = hand_features(hand)
 
-    strength = hand_strength(hand)
+    probs = train_step(x)
 
-    ev_call, ev_raise, win_rate = calc_ev(strength, opp)
+    action = ACTIONS[np.argmax(probs)]
 
-    base = gto(ev_call, ev_raise)
-
-    signals = detect_exploit(opp)
-
-    final = exploit_strategy(base, signals)
+    translate = {
+        "FOLD": "弃牌",
+        "CALL": "跟注",
+        "RAISE": "加注"
+    }
 
     return {
-        "手牌强度": round(strength, 2),
-        "胜率": round(win_rate, 2),
-        "GTO决策": base,
-        "对手特征": signals,
-        "最终建议": final,
-        "桌人数": players
+        "输入特征": x.tolist(),
+        "弃牌概率": round(float(probs[0]), 3),
+        "跟注概率": round(float(probs[1]), 3),
+        "加注概率": round(float(probs[2]), 3),
+        "最终决策": translate[action]
     }
 
 # =========================
-# 🌐 首页（手机App界面）
+# 🌐 UI
 # =========================
 @app.route("/")
 def home():
@@ -127,56 +112,50 @@ def home():
     <html>
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>德州AI</title>
+        <title>Deep CFR AI</title>
         <style>
-            body { font-family: Arial; text-align:center; padding:20px; background:#111; color:white; }
-            input { width:90%; padding:12px; margin:10px; font-size:18px; }
-            button { padding:12px 20px; font-size:18px; background:#00c853; color:white; border:none; }
-            .res { margin-top:20px; font-size:20px; white-space:pre-line; }
+            body{font-family:Arial;text-align:center;padding:20px;background:#111;color:#fff}
+            input{width:90%;padding:12px;margin:8px;font-size:16px}
+            button{padding:12px 20px;font-size:18px;background:#00c853;color:#fff;border:0}
+            .r{margin-top:20px;white-space:pre-line}
         </style>
     </head>
 
     <body>
-        <h2>🧠 德州AI（中文版 Level 9）</h2>
+        <h2>🧠 Deep CFR 德州AI</h2>
 
-        <input id="hand" placeholder="输入手牌（如 A K / AA / QJ）">
-        <input id="players" placeholder="人数（2-9人）">
+        <input id="hand" placeholder="手牌（如 AA / AK / QQ）">
 
-        <br>
-        <button onclick="run()">分析</button>
+        <button onclick="run()">训练 + 决策</button>
 
-        <div class="res" id="res"></div>
+        <div class="r" id="res"></div>
 
         <script>
-            function run(){
-                let h = document.getElementById('hand').value;
-                let p = document.getElementById('players').value || 6;
+        function run(){
+            let h=document.getElementById('hand').value;
 
-                fetch(`/ai?hand=${h}&players=${p}`)
-                .then(r=>r.json())
-                .then(d=>{
-                    document.getElementById('res').innerText =
-                    "手牌强度: " + d["手牌强度"] + "\\n" +
-                    "胜率: " + d["胜率"] + "\\n" +
-                    "GTO: " + d["GTO决策"] + "\\n" +
-                    "对手: " + d["对手特征"] + "\\n" +
-                    "最终建议: " + d["最终建议"];
-                })
-            }
+            fetch(`/ai?hand=${h}`)
+            .then(r=>r.json())
+            .then(d=>{
+                document.getElementById('res').innerText =
+                "弃牌概率: "+d["弃牌概率"]+"\n"+
+                "跟注概率: "+d["跟注概率"]+"\n"+
+                "加注概率: "+d["加注概率"]+"\n"+
+                "最终决策: "+d["最终决策"];
+            })
+        }
         </script>
     </body>
     </html>
     """
 
 # =========================
-# 🌐 API接口
+# 🌐 API
 # =========================
 @app.route("/ai")
 def ai():
-    hand = request.args.get("hand", "A K")
-    players = int(request.args.get("players", 6))
-
-    return jsonify(ai_engine(hand, players))
+    hand = request.args.get("hand","A K")
+    return jsonify(ai_engine(hand))
 
 # =========================
 # 🚀 启动
