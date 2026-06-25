@@ -1,123 +1,118 @@
 from flask import Flask, request, jsonify
-import random
 
 app = Flask(__name__)
 
-POSITIONS = ["BTN","SB","BB","UTG","UTG+1","MP","MP+1","CO","HJ"]
+# =========================
+# 🃏 解析牌（带花色）
+# =========================
+def parse(cards):
+    return [c.strip().upper() for c in cards.split() if c.strip()]
 
 # =========================
-# 🧠 初始化牌桌
+# 🧠 手牌强度（含花色思维）
 # =========================
-def create_table():
-    table = []
+def hand_strength(hand, board):
+    h = parse(hand)
+    b = parse(board)
 
-    for i in range(9):
-        table.append({
-            "seat": i,
-            "pos": POSITIONS[i],
-            "stack": 1000,
-            "status": "active",
-            "hand": random.choice(["A K","Q Q","J J","9 9","7 2"]),
-            "bet": 0
-        })
+    all_cards = h + b
 
-    return table
+    base = 0.4
 
-# =========================
-# 🧠 简单手牌强度
-# =========================
-def strength(hand):
+    # 高牌
+    if any(c[0] == "A" for c in h):
+        base += 0.1
+
     if "A" in hand and "K" in hand:
-        return 0.85
-    if hand[0] == hand[2]:
-        return 0.75
-    return 0.4
+        base += 0.2
+
+    # 对子
+    if len(set([c[0] for c in h])) < len(h):
+        base += 0.2
+
+    # 公共牌增强
+    if len(b) >= 3:
+        base += 0.1
+
+    return min(0.95, base)
 
 # =========================
-# 🎯 决策系统
+# 🧠 根据下注行为推 range（核心）
 # =========================
-def decide(strength, to_call):
-    if strength > 0.8:
-        return "raise"
-    if strength > 0.5 and to_call <= 50:
-        return "call"
-    return "fold"
+def estimate_range(action, street, board_texture):
 
-# =========================
-# 🧠 一轮下注逻辑
-# =========================
-def betting_round(table, pot, current_bet):
+    if action == "raise":
 
-    for p in table:
+        if "A" in board_texture:
+            return "强牌范围（顶对+ / AK / AA）"
+        else:
+            return "宽加注范围（诈唬 + 强牌混合）"
 
-        if p["status"] != "active":
-            continue
+    if action == "call":
+        return "中等范围（对子 / 听牌 / 弱顶对）"
 
-        s = strength(p["hand"])
+    if action == "fold":
+        return "弱范围（空气牌 / 无连接）"
 
-        to_call = current_bet - p["bet"]
-
-        action = decide(s, to_call)
-
-        if action == "fold":
-            p["status"] = "fold"
-
-        elif action == "call":
-            pay = min(to_call, p["stack"])
-            p["stack"] -= pay
-            p["bet"] += pay
-            pot += pay
-
-        elif action == "raise":
-            raise_amt = 100
-            total = to_call + raise_amt
-
-            pay = min(total, p["stack"])
-            p["stack"] -= pay
-            p["bet"] += pay
-            pot += pay
-
-            current_bet = p["bet"]
-
-    return table, pot, current_bet
+    return "未知范围"
 
 # =========================
-# 🧠 游戏一手（preflop）
+# 🧠 GTO + exploit决策
 # =========================
-def play_hand():
+def decision(strength, opp_action):
 
-    table = create_table()
+    if opp_action == "raise":
+        if strength > 0.7:
+            return "跟注（抓范围）"
+        return "弃牌"
 
-    pot = 0
-    current_bet = 50  # SB/BB简化
+    if opp_action == "call":
+        if strength > 0.6:
+            return "价值加注"
+        return "过牌"
 
-    # 小盲大盲强制下注
-    table[1]["stack"] -= 25
-    table[1]["bet"] = 25
-    table[2]["stack"] -= 50
-    table[2]["bet"] = 50
+    return "过牌"
 
-    pot += 75
-    current_bet = 50
+# =========================
+# 🧠 AI核心（真正局面版）
+# =========================
+def ai(hand, board, opp_action):
 
-    # 一轮下注
-    table, pot, current_bet = betting_round(table, pot, current_bet)
+    strength = hand_strength(hand, board)
+
+    board_cards = parse(board)
+
+    range_read = estimate_range(
+        opp_action,
+        "flop",
+        "".join(board_cards)
+    )
+
+    action = decision(strength, opp_action)
 
     return {
-        "table": table,
-        "pot": pot,
-        "current_bet": current_bet
+        "手牌": hand,
+        "公共牌": board,
+        "手牌强度": round(strength, 2),
+        "对手动作": opp_action,
+        "推测对手范围": range_read,
+        "建议动作": action
     }
 
 # =========================
 # 🌐 API
 # =========================
 @app.route("/ai")
-def ai():
-    return jsonify(play_hand())
+def api():
+
+    hand = request.args.get("hand","A♠ K♠")
+    board = request.args.get("board","Q♥ J♦ 10♣")
+    opp_action = request.args.get("action","raise")
+
+    return jsonify(ai(hand, board, opp_action))
 
 # =========================
-# 🌐 UI（真实牌桌）
+# 🌐 UI（重点：真实牌桌信息）
 # =========================
 @app.route("/")
 def home():
@@ -126,80 +121,48 @@ def home():
     <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-
-    body{
-        background:#111;
-        color:white;
-        font-family:Arial;
-        text-align:center;
-    }
-
-    .table{
-        display:grid;
-        grid-template-columns:repeat(3,1fr);
-        gap:10px;
-        margin-top:20px;
-    }
-
-    .player{
-        padding:10px;
-        border:1px solid #444;
-        border-radius:10px;
-    }
-
-    .active{color:#00ff7f}
-    .fold{color:#ff4444}
-
-    button{
-        padding:12px;
-        margin-top:10px;
-        background:#00c853;
-        border:0;
-        color:white;
-    }
-
+    body{background:#111;color:#fff;font-family:Arial;text-align:center;padding:20px}
+    input{width:90%;padding:12px;margin:8px}
+    button{padding:12px;background:#00c853;border:0;color:#fff}
+    .r{white-space:pre-line;margin-top:20px}
     </style>
     </head>
 
     <body>
 
-    <h2>🧠 9人桌下注系统（筹码版）</h2>
+    <h2>🧠 德州局面分析AI（范围推理版）</h2>
 
-    <button onclick="run()">下一手</button>
+    <input id="hand" placeholder="手牌（A♠ K♠）">
+    <input id="board" placeholder="公共牌（Q♥ J♦ 10♣）">
 
-    <div id="pot"></div>
-    <div class="table" id="table"></div>
+    <select id="action">
+        <option value="raise">对手加注</option>
+        <option value="call">对手跟注</option>
+        <option value="fold">对手弃牌</option>
+    </select>
+
+    <button onclick="run()">分析</button>
+
+    <div class="r" id="res"></div>
 
     <script>
-
     function run(){
-        fetch('/ai')
+        let h=document.getElementById("hand").value;
+        let b=document.getElementById("board").value;
+        let a=document.getElementById("action").value;
+
+        fetch(`/ai?hand=${h}&board=${b}&action=${a}`)
         .then(r=>r.json())
         .then(d=>{
-
-            document.getElementById("pot").innerHTML =
-            "<h3>底池: " + d.pot + "</h3>";
-
-            let html = "";
-
-            d.table.forEach(p=>{
-                html += `
-                <div class="player ${p.status}">
-                    <b>${p.pos}</b><br>
-                    ${p.hand}<br>
-                    筹码: ${p.stack}<br>
-                    状态: ${p.status}<br>
-                    已下注: ${p.bet}
-                </div>
-                `;
-            });
-
-            document.getElementById("table").innerHTML = html;
-        });
+            document.getElementById("res").innerText =
+            "手牌: "+d["手牌"]+"\n"+
+            "公共牌: "+d["公共牌"]+"\n"+
+            "强度: "+d["手牌强度"]+"\n"+
+            "对手动作: "+d["对手动作"]+"\n"+
+            "推测范围: "+d["推测对手范围"]+"\n"+
+            "建议: "+d["建议动作"];
+        })
     }
-
-    run();
-
     </script>
 
     </body>
