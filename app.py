@@ -5,36 +5,29 @@ app = Flask(__name__)
 POSITIONS = ["UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB","BB"]
 
 # =========================
-# 🧠 初始化牌桌
+# 🧠 状态（全局稳定）
 # =========================
 TABLE = [
-    {
-        "id": i,
-        "pos": POSITIONS[i],
-        "status": "active",
-        "hand": "",
-        "note": ""
-    }
+    {"id": i, "pos": POSITIONS[i], "status": "active", "hand": ""}
     for i in range(9)
 ]
 
 BOARD = ""
+MY_HAND = ""
 
 # =========================
-# 🧠 设置手牌（用户输入）
+# 🧠 设置你的手牌（不会丢）
 # =========================
 @app.route("/set_hand")
 def set_hand():
 
-    pid = int(request.args.get("id"))
-    hand = request.args.get("hand","")
+    global MY_HAND
+    MY_HAND = request.args.get("hand","")
 
-    TABLE[pid]["hand"] = hand
-
-    return jsonify(TABLE)
+    return jsonify({"hand": MY_HAND})
 
 # =========================
-# 🧠 设置公共牌
+# 🧠 设置公共牌（不会丢）
 # =========================
 @app.route("/set_board")
 def set_board():
@@ -55,23 +48,21 @@ def action():
 
     if act == "fold":
         TABLE[pid]["status"] = "fold"
-        TABLE[pid]["note"] = "弃牌"
 
     elif act == "call":
         TABLE[pid]["status"] = "active"
-        TABLE[pid]["note"] = "跟注"
 
     elif act == "raise":
         TABLE[pid]["status"] = "active"
-        TABLE[pid]["note"] = "加注"
 
     return jsonify({
         "table": TABLE,
-        "board": BOARD
+        "board": BOARD,
+        "my_hand": MY_HAND
     })
 
 # =========================
-# 🌐 UI
+# 🌐 UI（完全稳定版）
 # =========================
 @app.route("/")
 def home():
@@ -106,7 +97,6 @@ def home():
         border:1px solid #444;
         padding:10px;
         border-radius:10px;
-        font-size:14px;
     }
 
     .fold{color:red}
@@ -120,12 +110,16 @@ def home():
         color:white;
     }
 
-    .foldbtn{background:#ff4444;}
-
     .board{
         margin-top:10px;
         color:#00ffcc;
         font-size:16px;
+    }
+
+    .me{
+        color:#ffd700;
+        font-size:18px;
+        margin-top:10px;
     }
 
     </style>
@@ -133,23 +127,18 @@ def home():
 
     <body>
 
-    <h2>🧠 9人德州交互牌桌（手动版）</h2>
+    <h2>🧠 9人德州交互牌桌（稳定版）</h2>
 
-    <h3>设置手牌</h3>
+    <!-- 🟡 永远存在：你的手牌 -->
+    <input id="hand" placeholder="我的手牌（如 A♠ K♠）">
+    <button onclick="setHand()">设置我的手牌</button>
 
-    <input id="hand0" placeholder="UTG 手牌">
-    <button onclick="setHand(0)">设置UTG</button>
-
-    <input id="hand1" placeholder="UTG+1 手牌">
-    <button onclick="setHand(1)">设置UTG+1</button>
-
-    <hr>
-
-    <h3>公共牌</h3>
-    <input id="board" placeholder="例如：A♠ K♥ Q♦">
+    <!-- 🟡 永远存在：公共牌 -->
+    <input id="board" placeholder="公共牌（如 Q♥ J♦ 10♣）">
     <button onclick="setBoard()">设置公共牌</button>
 
-    <div class="board" id="boardView">公共牌：空</div>
+    <div class="me" id="me">我的手牌：未设置</div>
+    <div class="board" id="boardView">公共牌：未设置</div>
 
     <div class="grid" id="table"></div>
 
@@ -158,7 +147,10 @@ def home():
     function render(d){
 
         document.getElementById("boardView").innerText =
-        "公共牌: " + d.board;
+        "公共牌：" + d.board;
+
+        document.getElementById("me").innerText =
+        "我的手牌：" + d.my_hand;
 
         let html = "";
 
@@ -169,7 +161,6 @@ def home():
                 <b>${p.pos}</b><br>
                 ${p.hand || "空"}<br>
                 状态: ${p.status}<br>
-                ${p.note}<br>
 
                 <button onclick="act(${p.id},'fold')">弃牌</button>
                 <button onclick="act(${p.id},'call')">跟注</button>
@@ -181,28 +172,22 @@ def home():
         document.getElementById("table").innerHTML = html;
     }
 
-    function setHand(id){
+    function setHand(){
 
-        let val = document.getElementById("hand"+id).value;
+        let h = document.getElementById("hand").value;
 
-        fetch(`/set_hand?id=${id}&hand=${val}`)
+        fetch(`/set_hand?hand=${h}`)
         .then(r=>r.json())
-        .then(d=>render({table:d,board:""}));
+        .then(()=>refresh());
     }
 
     function setBoard(){
 
-        let val = document.getElementById("board").value;
+        let b = document.getElementById("board").value;
 
-        fetch(`/set_board?board=${val}`)
+        fetch(`/set_board?board=${b}`)
         .then(r=>r.json())
-        .then(d=>{
-
-            fetch("/action?id=0&act=none")
-            .then(r=>r.json())
-            .then(x=>render(x));
-
-        });
+        .then(()=>refresh());
     }
 
     function act(id,act){
@@ -211,6 +196,15 @@ def home():
         .then(r=>r.json())
         .then(d=>render(d));
     }
+
+    function refresh(){
+
+        fetch(`/action?id=0&act=none`)
+        .then(r=>r.json())
+        .then(d=>render(d));
+    }
+
+    refresh();
 
     </script>
 
