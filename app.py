@@ -5,9 +5,6 @@ app = Flask(__name__)
 
 POSITIONS = ["YOU","UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB"]
 
-# =========================
-# 🧠 真实牌库（52张）
-# =========================
 SUITS = ["♠","♥","♦","♣"]
 RANKS = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"]
 
@@ -17,99 +14,84 @@ BOARD = ["","","","",""]
 PLAYER_COUNT = 2
 
 # =========================
-# 🧠 生成牌库 + 洗牌
+# 🧠 牌库
 # =========================
 def new_deck():
     deck = [r+s for r in RANKS for s in SUITS]
     random.shuffle(deck)
     return deck
 
-DECK = new_deck()
-
-# =========================
-# 🧠 发牌（从真实牌库抽）
-# =========================
-def deal_card():
+def deal():
     return DECK.pop() if DECK else ""
 
 # =========================
-# 🧠 创建玩家（自动发两张手牌）
+# 🧠 初始化
 # =========================
 def create_players(n):
 
-    global DECK
-
-    players = []
-
-    for i in range(n):
-
-        players.append({
+    return [
+        {
             "id": i,
             "pos": POSITIONS[i],
             "status": "active",
-            "hand": [deal_card(), deal_card()]
-        })
-
-    return players
-
-PLAYERS = create_players(PLAYER_COUNT)
+            "hand": [deal(), deal()]
+        }
+        for i in range(n)
+    ]
 
 # =========================
-# 🧠 重开局（核心功能）
+# 🧠 开局
+# =========================
+def start_game(n):
+
+    global DECK, PLAYERS, BOARD, PLAYER_COUNT
+
+    PLAYER_COUNT = n
+    DECK = new_deck()
+    BOARD = ["","","","",""]
+    PLAYERS = create_players(n)
+
+start_game(2)
+
+# =========================
+# 🔄 重开局（核心）
 # =========================
 @app.route("/reset")
 def reset():
 
-    global DECK, PLAYERS, BOARD
-
-    DECK = new_deck()
-    BOARD = ["","","","",""]
-
-    PLAYERS = create_players(PLAYER_COUNT)
+    start_game(PLAYER_COUNT)
 
     return jsonify({
-        "msg":"new game",
-        "deck_left": len(DECK)
+        "msg":"reset ok"
     })
 
 # =========================
-# 🧠 设置玩家数量
+# 👥 设置人数
 # =========================
 @app.route("/set_players")
 def set_players():
 
-    global PLAYERS, PLAYER_COUNT
-
     n = int(request.args.get("n",2))
     n = max(2, min(9, n))
 
-    PLAYER_COUNT = n
-
-    DECK = new_deck()
-    PLAYERS = create_players(n)
+    start_game(n)
 
     return jsonify({"players": PLAYER_COUNT})
 
 # =========================
-# 🧠 设置公共牌（从牌库发，不是手动输入）
+# 🌍 发公共牌
 # =========================
 @app.route("/deal_board")
 def deal_board():
 
     global BOARD
 
-    BOARD = [
-        deal_card(),
-        deal_card(),
-        deal_card(),
-        deal_card(),
-        deal_card()
-    ]
+    BOARD = [deal(),deal(),deal(),deal(),deal()]
 
     return jsonify({"board": BOARD})
 
 # =========================
-# 🧠 玩家操作
+# 🎮 操作
 # =========================
 @app.route("/action")
 def action():
@@ -123,21 +105,18 @@ def action():
 
         if act == "fold":
             p["status"] = "fold"
-
         elif act == "call":
             p["status"] = "active"
-
         elif act == "raise":
             p["status"] = "active"
 
     return jsonify({
         "players": PLAYERS,
-        "board": BOARD,
-        "deck_left": len(DECK)
+        "board": BOARD
     })
 
 # =========================
-# 🌐 UI（真实牌库版）
+# 🌐 UI（手机优化版）
 # =========================
 @app.route("/")
 def home():
@@ -151,47 +130,77 @@ def home():
         background:#111;
         color:white;
         font-family:Arial;
-        text-align:center;
         padding:10px;
     }
 
-    input,button{
-        width:90%;
+    button,input{
+        width:100%;
         padding:10px;
-        margin:5px;
+        margin:5px 0;
     }
 
-    .box{
-        border:1px solid #444;
-        margin:5px;
-        padding:8px;
-        border-radius:8px;
+    .board{
+        color:#00ffcc;
+        margin:10px 0;
+        font-size:14px;
     }
 
-    .board{color:#00ffcc;margin:10px;}
-    .hand{color:#ffd700;}
+    /* 🟣 手机卡片（重点优化） */
+    .card{
+        background:#1c1c1c;
+        border-radius:10px;
+        margin:10px 0;
+        padding:10px;
+    }
+
+    .hidden{
+        display:none;
+    }
+
+    .title{
+        display:flex;
+        justify-content:space-between;
+        cursor:pointer;
+    }
+
+    .btnrow button{
+        width:32%;
+        font-size:12px;
+    }
 
     </style>
     </head>
 
     <body>
 
-    <h2>🧠 德州（真实牌库版）</h2>
+    <h3>🧠 德州（移动优化版）</h3>
 
     <!-- 👥 玩家 -->
     <input id="n" type="number" value="2" min="2" max="9">
-    <button onclick="setPlayers()">设置玩家 + 重发牌</button>
+    <button onclick="setPlayers()">设置人数 & 重开局</button>
 
     <!-- 🔄 重开局 -->
     <button onclick="resetGame()">🔄 重开局</button>
 
     <!-- 🌍 公共牌 -->
-    <button onclick="dealBoard()">发公共牌（5张）</button>
+    <button onclick="dealBoard()">发公共牌</button>
 
     <div class="board" id="board"></div>
+
     <div id="root"></div>
 
     <script>
+
+    function toggle(id){
+
+        let el=document.getElementById(id);
+
+        if(el.classList.contains("hidden")){
+            el.classList.remove("hidden");
+        }else{
+            el.classList.add("hidden");
+        }
+    }
 
     function setPlayers(){
 
@@ -226,22 +235,33 @@ def home():
     function render(d){
 
         document.getElementById("board").innerText =
-        "公共牌：" + d.board.join(" ");
+        "公共牌: " + d.board.join(" ");
 
         let html="";
 
         d.players.forEach(p=>{
 
+            let id="p"+p.id;
+
             html+=`
-            <div class="box">
-                <b>${p.pos}</b><br>
+            <div class="card">
 
-                手牌：${p.hand.join(" ")}<br>
-                状态：${p.status}<br>
+                <div class="title" onclick="toggle('${id}')">
+                    <b>${p.pos}</b>
+                    <span>${p.status}</span>
+                </div>
 
-                <button onclick="act(${p.id},'fold')">弃牌</button>
-                <button onclick="act(${p.id},'call')">跟注</button>
-                <button onclick="act(${p.id},'raise')">加注</button>
+                <div id="${id}" class="hidden">
+
+                    <div>手牌：${p.hand.join(" ")}</div>
+
+                    <div class="btnrow">
+                        <button onclick="act(${p.id},'fold')">弃牌</button>
+                        <button onclick="act(${p.id},'call')">跟注</button>
+                        <button onclick="act(${p.id},'raise')">加注</button>
+                    </div>
+
+                </div>
             </div>`;
         });
 
