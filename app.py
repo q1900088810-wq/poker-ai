@@ -1,31 +1,21 @@
 from flask import Flask, request, jsonify
-import random
 
 app = Flask(__name__)
 
 POSITIONS = ["YOU","UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB"]
 
-SUITS = ["♠","♥","♦","♣"]
-RANKS = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"]
-
-DECK = []
+# =========================
+# 🧠 状态
+# =========================
 PLAYERS = []
-BOARD = ["","","","",""]
 PLAYER_COUNT = 2
 
-# =========================
-# 🧠 牌库
-# =========================
-def new_deck():
-    deck = [r+s for r in RANKS for s in SUITS]
-    random.shuffle(deck)
-    return deck
-
-def deal():
-    return DECK.pop() if DECK else ""
+MY_HAND = ["",""]
+BOARD = ["","","","",""]
+STREET = "preflop"  # flop / turn / river
 
 # =========================
-# 🧠 初始化
+# 🧠 玩家
 # =========================
 def create_players(n):
 
@@ -33,90 +23,88 @@ def create_players(n):
         {
             "id": i,
             "pos": POSITIONS[i],
-            "status": "active",
-            "hand": [deal(), deal()]
+            "status": "active"
         }
         for i in range(n)
     ]
 
-# =========================
-# 🧠 开局
-# =========================
-def start_game(n):
-
-    global DECK, PLAYERS, BOARD, PLAYER_COUNT
-
-    PLAYER_COUNT = n
-    DECK = new_deck()
-    BOARD = ["","","","",""]
-    PLAYERS = create_players(n)
-
-start_game(2)
+PLAYERS = create_players(PLAYER_COUNT)
 
 # =========================
-# 🔄 重开局（核心）
-# =========================
-@app.route("/reset")
-def reset():
-
-    start_game(PLAYER_COUNT)
-
-    return jsonify({
-        "msg":"reset ok"
-    })
-
-# =========================
-# 👥 设置人数
+# 🧠 玩家数量
 # =========================
 @app.route("/set_players")
 def set_players():
 
+    global PLAYERS, PLAYER_COUNT
+
     n = int(request.args.get("n",2))
     n = max(2, min(9, n))
 
-    start_game(n)
+    PLAYER_COUNT = n
+    PLAYERS = create_players(n)
 
     return jsonify({"players": PLAYER_COUNT})
 
 # =========================
-# 🌍 发公共牌
+# 🧠 设置手牌（你选2张）
 # =========================
-@app.route("/deal_board")
-def deal_board():
+@app.route("/set_hand")
+def set_hand():
 
-    global BOARD
+    global MY_HAND
 
-    BOARD = [deal(),deal(),deal(),deal(),deal()]
+    MY_HAND = request.args.get("hand","").split()
 
-    return jsonify({"board": BOARD})
-
-# =========================
-# 🎮 操作
-# =========================
-@app.route("/action")
-def action():
-
-    pid = int(request.args.get("id"))
-    act = request.args.get("act")
-
-    if pid < len(PLAYERS):
-
-        p = PLAYERS[pid]
-
-        if act == "fold":
-            p["status"] = "fold"
-        elif act == "call":
-            p["status"] = "active"
-        elif act == "raise":
-            p["status"] = "active"
-
-    return jsonify({
-        "players": PLAYERS,
-        "board": BOARD
-    })
+    return jsonify({"hand": MY_HAND})
 
 # =========================
-# 🌐 UI（手机优化版）
+# 🧠 设置Flop（3张）
+# =========================
+@app.route("/set_flop")
+def set_flop():
+
+    global BOARD, STREET
+
+    cards = request.args.get("cards","").split()
+
+    BOARD[0:3] = (cards + ["","",""])[:3]
+    STREET = "flop"
+
+    return jsonify({"board": BOARD[:3], "street": STREET})
+
+# =========================
+# 🧠 Turn（第4张）
+# =========================
+@app.route("/set_turn")
+def set_turn():
+
+    global BOARD, STREET
+
+    card = request.args.get("card","")
+
+    BOARD[3] = card
+    STREET = "turn"
+
+    return jsonify({"board": BOARD[:4], "street": STREET})
+
+# =========================
+# 🧠 River（第5张）
+# =========================
+@app.route("/set_river")
+def set_river():
+
+    global BOARD, STREET
+
+    card = request.args.get("card","")
+
+    BOARD[4] = card
+    STREET = "river"
+
+    return jsonify({"board": BOARD, "street": STREET})
+
+# =========================
+# 🌐 UI
 # =========================
 @app.route("/")
 def home():
@@ -133,148 +121,99 @@ def home():
         padding:10px;
     }
 
-    button,input{
+    input,select,button{
         width:100%;
         padding:10px;
         margin:5px 0;
     }
 
-    .board{
-        color:#00ffcc;
-        margin:10px 0;
-        font-size:14px;
+    .box{
+        border:1px solid #444;
+        padding:8px;
+        margin:5px 0;
     }
 
-    /* 🟣 手机卡片（重点优化） */
-    .card{
-        background:#1c1c1c;
-        border-radius:10px;
-        margin:10px 0;
-        padding:10px;
-    }
-
-    .hidden{
-        display:none;
-    }
-
-    .title{
-        display:flex;
-        justify-content:space-between;
-        cursor:pointer;
-    }
-
-    .btnrow button{
-        width:32%;
-        font-size:12px;
-    }
+    .board{color:#00ffcc;}
+    .me{color:#ffd700;}
 
     </style>
     </head>
 
     <body>
 
-    <h3>🧠 德州（移动优化版）</h3>
+    <h2>🧠 德州（正确街道版）</h2>
 
     <!-- 👥 玩家 -->
     <input id="n" type="number" value="2" min="2" max="9">
-    <button onclick="setPlayers()">设置人数 & 重开局</button>
+    <button onclick="setPlayers()">设置玩家</button>
 
-    <!-- 🔄 重开局 -->
-    <button onclick="resetGame()">🔄 重开局</button>
+    <!-- 🎴 手牌 -->
+    <h3>我的手牌（2张）</h3>
+    <input id="h1">
+    <input id="h2">
+    <button onclick="setHand()">设置手牌</button>
 
-    <!-- 🌍 公共牌 -->
-    <button onclick="dealBoard()">发公共牌</button>
+    <!-- 🌍 Flop -->
+    <h3>Flop（3张）</h3>
+    <input id="f1">
+    <input id="f2">
+    <input id="f3">
+    <button onclick="setFlop()">设置Flop</button>
+
+    <!-- Turn -->
+    <h3>Turn（1张）</h3>
+    <input id="t">
+    <button onclick="setTurn()">设置Turn</button>
+
+    <!-- River -->
+    <h3>River（1张）</h3>
+    <input id="r">
+    <button onclick="setRiver()">设置River</button>
 
     <div class="board" id="board"></div>
-
-    <div id="root"></div>
+    <div class="me" id="me"></div>
 
     <script>
-
-    function toggle(id){
-
-        let el=document.getElementById(id);
-
-        if(el.classList.contains("hidden")){
-            el.classList.remove("hidden");
-        }else{
-            el.classList.add("hidden");
-        }
-    }
 
     function setPlayers(){
 
         let n=document.getElementById("n").value;
 
-        fetch("/set_players?n="+n)
-        .then(r=>r.json())
-        .then(()=>load());
+        fetch("/set_players?n="+n).then(r=>r.json());
     }
 
-    function resetGame(){
+    function setHand(){
 
-        fetch("/reset")
-        .then(r=>r.json())
-        .then(()=>load());
+        let h=
+        document.getElementById("h1").value+" "+
+        document.getElementById("h2").value;
+
+        fetch("/set_hand?hand="+h).then(r=>r.json());
     }
 
-    function dealBoard(){
+    function setFlop(){
 
-        fetch("/deal_board")
-        .then(r=>r.json())
-        .then(()=>load());
+        let c=
+        document.getElementById("f1").value+" "+
+        document.getElementById("f2").value+" "+
+        document.getElementById("f3").value;
+
+        fetch("/set_flop?cards="+c).then(r=>r.json());
     }
 
-    function act(id,a){
+    function setTurn(){
 
-        fetch(`/action?id=${id}&act=${a}`)
-        .then(r=>r.json())
-        .then(d=>render(d));
+        let c=document.getElementById("t").value;
+
+        fetch("/set_turn?card="+c).then(r=>r.json());
     }
 
-    function render(d){
+    function setRiver(){
 
-        document.getElementById("board").innerText =
-        "公共牌: " + d.board.join(" ");
+        let c=document.getElementById("r").value;
 
-        let html="";
-
-        d.players.forEach(p=>{
-
-            let id="p"+p.id;
-
-            html+=`
-            <div class="card">
-
-                <div class="title" onclick="toggle('${id}')">
-                    <b>${p.pos}</b>
-                    <span>${p.status}</span>
-                </div>
-
-                <div id="${id}" class="hidden">
-
-                    <div>手牌：${p.hand.join(" ")}</div>
-
-                    <div class="btnrow">
-                        <button onclick="act(${p.id},'fold')">弃牌</button>
-                        <button onclick="act(${p.id},'call')">跟注</button>
-                        <button onclick="act(${p.id},'raise')">加注</button>
-                    </div>
-
-                </div>
-            </div>`;
-        });
-
-        document.getElementById("root").innerHTML=html;
+        fetch("/set_river?card="+c).then(r=>r.json());
     }
-
-    function load(){
-        fetch("/action?id=0&act=none")
-        .then(r=>r.json())
-        .then(d=>render(d));
-    }
-
-    load();
 
     </script>
 
