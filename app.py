@@ -4,66 +4,66 @@ app = Flask(__name__)
 
 POSITIONS = ["YOU","UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB"]
 
-RANKS = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"]
-SUITS = ["♠","♥","♦","♣"]
+# =========================
+# 🧠 状态（单一牌局）
+# =========================
+PLAYERS = []
+PLAYER_COUNT = 2
 
-# =========================
-# 🧠 多桌系统
-# =========================
-TABLES = {}
-
-# =========================
-# 🧠 UI状态（关键补回）
-# =========================
-MY_HAND = ""
 BOARD = ["","","","",""]
+MY_HAND = ""
 
 # =========================
-# 🧠 创建桌子
+# 🧠 创建玩家（关键）
 # =========================
-def create_table():
+def create_players(n):
 
-    return {
-        "players": [
-            {
-                "id": i,
-                "pos": POSITIONS[i],
-                "status": "active",
-                "hand": ""
-            }
-            for i in range(9)
-        ]
-    }
-
-# =========================
-# 🧠 初始化桌子
-# =========================
-@app.route("/init_tables")
-def init_tables():
-
-    n = int(request.args.get("n",2))
-
-    TABLES.clear()
+    players = []
 
     for i in range(n):
-        TABLES[i] = create_table()
 
-    return jsonify({"tables": len(TABLES)})
+        players.append({
+            "id": i,
+            "pos": POSITIONS[i],
+            "status": "active",
+            "hand": ""
+        })
+
+    return players
+
+PLAYERS = create_players(PLAYER_COUNT)
 
 # =========================
-# 🧠 设置手牌（重新补回UI）
+# 🧠 设置玩家数量（2-9）
+# =========================
+@app.route("/set_players")
+def set_players():
+
+    global PLAYER_COUNT, PLAYERS
+
+    n = int(request.args.get("n",2))
+    n = max(2, min(9, n))
+
+    PLAYER_COUNT = n
+    PLAYERS = create_players(n)
+
+    return jsonify({
+        "players": PLAYER_COUNT
+    })
+
+# =========================
+# 🧠 设置手牌
 # =========================
 @app.route("/set_hand")
 def set_hand():
 
     global MY_HAND
-
     MY_HAND = request.args.get("hand","")
 
     return jsonify({"hand": MY_HAND})
 
 # =========================
-# 🧠 设置公共牌（重新补回UI）
+# 🧠 设置公共牌（5张）
 # =========================
 @app.route("/set_board")
 def set_board():
@@ -71,26 +71,22 @@ def set_board():
     global BOARD
 
     cards = request.args.get("board","").split()
-
     BOARD = (cards + ["","","","",""])[:5]
 
     return jsonify({"board": BOARD})
 
 # =========================
-# 🧠 操作某桌
+# 🧠 玩家操作
 # =========================
 @app.route("/action")
 def action():
 
-    tid = int(request.args.get("table"))
     pid = int(request.args.get("id"))
     act = request.args.get("act")
 
-    table = TABLES.get(tid)
+    if pid < len(PLAYERS):
 
-    if table:
-
-        p = table["players"][pid]
+        p = PLAYERS[pid]
 
         if act == "fold":
             p["status"] = "fold"
@@ -102,13 +98,14 @@ def action():
             p["status"] = "active"
 
     return jsonify({
-        "tables": TABLES,
+        "players": PLAYERS,
+        "board": BOARD,
         "my_hand": MY_HAND,
-        "board": BOARD
+        "count": PLAYER_COUNT
     })
 
 # =========================
-# 🌐 UI（最终融合版）
+# 🌐 UI（干净最终版）
 # =========================
 @app.route("/")
 def home():
@@ -132,13 +129,6 @@ def home():
         margin:5px;
     }
 
-    .table{
-        border:1px solid #444;
-        margin:10px;
-        padding:10px;
-        border-radius:10px;
-    }
-
     .grid{
         display:grid;
         grid-template-columns:repeat(3,1fr);
@@ -146,40 +136,33 @@ def home():
     }
 
     .box{
-        border:1px solid #333;
-        padding:6px;
+        border:1px solid #444;
+        padding:8px;
         font-size:12px;
+        border-radius:8px;
     }
 
-    .board{
-        color:#00ffcc;
-        margin:10px;
-    }
-
-    .me{
-        color:#ffd700;
-        margin:10px;
-    }
+    .board{color:#00ffcc;margin:10px;}
+    .me{color:#ffd700;margin:10px;}
 
     </style>
     </head>
 
     <body>
 
-    <h2>🧠 德州系统（UI+多桌完整修复版）</h2>
+    <!-- 👥 玩家数量 -->
+    <h3>玩家数量 (2-9)</h3>
+    <input id="n" type="number" value="2" min="2" max="9">
+    <button onclick="setPlayers()">设置玩家</button>
 
-    <!-- 🟡 人数 -->
-    <input id="n" type="number" value="2" min="1" max="10">
-    <button onclick="init()">创建桌子</button>
-
-    <!-- 🎴 手牌选择 -->
-    <h3>我的手牌</h3>
+    <!-- 🎴 手牌 -->
+    <h3>手牌</h3>
     <select id="h1"></select>
     <select id="h2"></select>
     <button onclick="setHand()">设置手牌</button>
 
     <!-- 🌍 公共牌 -->
-    <h3>公共牌</h3>
+    <h3>公共牌（5张）</h3>
     <select id="b1"></select>
     <select id="b2"></select>
     <select id="b3"></select>
@@ -199,6 +182,7 @@ def home():
 
     function build(id){
         let el=document.getElementById(id);
+
         R.forEach(r=>{
             S.forEach(s=>{
                 let o=document.createElement("option");
@@ -210,9 +194,17 @@ def home():
     }
 
     function initUI(){
-
         build("h1");build("h2");
         build("b1");build("b2");build("b3");build("b4");build("b5");
+    }
+
+    function setPlayers(){
+
+        let n=document.getElementById("n").value;
+
+        fetch("/set_players?n="+n)
+        .then(r=>r.json())
+        .then(()=>load());
     }
 
     function setHand(){
@@ -238,18 +230,9 @@ def home():
         .then(()=>load());
     }
 
-    function init(){
+    function act(id,a){
 
-        let n=document.getElementById("n").value;
-
-        fetch("/init_tables?n="+n)
-        .then(r=>r.json())
-        .then(()=>load());
-    }
-
-    function act(tid,pid,a){
-
-        fetch(`/action?table=${tid}&id=${pid}&act=${a}`)
+        fetch(`/action?id=${id}&act=${a}`)
         .then(r=>r.json())
         .then(d=>render(d));
     }
@@ -257,44 +240,31 @@ def home():
     function render(d){
 
         document.getElementById("me").innerText =
-        "手牌："+d.my_hand;
+        "我的手牌：" + d.my_hand;
 
         document.getElementById("board").innerText =
-        "公共牌："+d.board.join(" ");
+        "公共牌：" + d.board.join(" ");
 
         let html="";
 
-        Object.keys(d.tables).forEach(tid=>{
+        d.players.forEach(p=>{
 
-            let t=d.tables[tid];
+            html+=`
+            <div class="box ${p.status=='fold'?'fold':''}">
+                ${p.pos}<br>
+                ${p.status}<br>
 
-            html+=`<div class="table">
-            <h3>桌子 ${tid}</h3>
-            <div class="grid">`;
-
-            t.players.forEach(p=>{
-
-                html+=`
-                <div class="box">
-                    <b>${p.pos}</b><br>
-                    ${p.hand||"空"}<br>
-                    ${p.status}<br>
-
-                    <button onclick="act(${tid},${p.id},'fold')">弃牌</button>
-                    <button onclick="act(${tid},${p.id},'call')">跟注</button>
-                    <button onclick="act(${tid},${p.id},'raise')">加注</button>
-                </div>`;
-            });
-
-            html+=`</div></div>`;
+                <button onclick="act(${p.id},'fold')">弃牌</button>
+                <button onclick="act(${p.id},'call')">跟注</button>
+                <button onclick="act(${p.id},'raise')">加注</button>
+            </div>`;
         });
 
         document.getElementById("root").innerHTML=html;
     }
 
     function load(){
-
-        fetch("/action?table=0&id=0&act=none")
+        fetch("/action?id=0&act=none")
         .then(r=>r.json())
         .then(d=>render(d));
     }
