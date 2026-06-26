@@ -1,110 +1,78 @@
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, request
+import random
 
 app = Flask(__name__)
 
-POSITIONS = ["YOU","UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB"]
+# =========================
+# 🧠 牌库
+# =========================
+RANKS = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"]
+SUITS = ["♠","♥","♦","♣"]
+
+def new_deck():
+    deck = [r+s for r in RANKS for s in SUITS]
+    random.shuffle(deck)
+    return deck
 
 # =========================
-# 🧠 状态
+# 🧠 游戏状态
 # =========================
-PLAYERS = []
-PLAYER_COUNT = 2
-
-MY_HAND = ["",""]
-BOARD = ["","","","",""]
-STREET = "preflop"  # flop / turn / river
-
-# =========================
-# 🧠 玩家
-# =========================
-def create_players(n):
-
-    return [
-        {
-            "id": i,
-            "pos": POSITIONS[i],
-            "status": "active"
-        }
-        for i in range(n)
-    ]
-
-PLAYERS = create_players(PLAYER_COUNT)
+state = {
+    "deck": [],
+    "players": [],
+    "board": [],
+    "street": "preflop"
+}
 
 # =========================
-# 🧠 玩家数量
+# 🧠 开始新牌局
 # =========================
-@app.route("/set_players")
-def set_players():
-
-    global PLAYERS, PLAYER_COUNT
+@app.route("/start")
+def start():
 
     n = int(request.args.get("n",2))
     n = max(2, min(9, n))
 
-    PLAYER_COUNT = n
-    PLAYERS = create_players(n)
+    deck = new_deck()
 
-    return jsonify({"players": PLAYER_COUNT})
+    players = []
+    for i in range(n):
+        players.append({
+            "id": i,
+            "hand": [deck.pop(), deck.pop()]
+        })
 
-# =========================
-# 🧠 设置手牌（你选2张）
-# =========================
-@app.route("/set_hand")
-def set_hand():
+    state["deck"] = deck
+    state["players"] = players
+    state["board"] = []
+    state["street"] = "preflop"
 
-    global MY_HAND
-
-    MY_HAND = request.args.get("hand","").split()
-
-    return jsonify({"hand": MY_HAND})
-
-# =========================
-# 🧠 设置Flop（3张）
-# =========================
-@app.route("/set_flop")
-def set_flop():
-
-    global BOARD, STREET
-
-    cards = request.args.get("cards","").split()
-
-    BOARD[0:3] = (cards + ["","",""])[:3]
-    STREET = "flop"
-
-    return jsonify({"board": BOARD[:3], "street": STREET})
+    return jsonify(state)
 
 # =========================
-# 🧠 Turn（第4张）
+# 🧠 下一步（自动推进）
 # =========================
-@app.route("/set_turn")
-def set_turn():
+@app.route("/next")
+def next_step():
 
-    global BOARD, STREET
+    deck = state["deck"]
 
-    card = request.args.get("card","")
+    if state["street"] == "preflop":
+        state["board"] = [deck.pop(), deck.pop(), deck.pop()]
+        state["street"] = "flop"
 
-    BOARD[3] = card
-    STREET = "turn"
+    elif state["street"] == "flop":
+        state["board"].append(deck.pop())
+        state["street"] = "turn"
 
-    return jsonify({"board": BOARD[:4], "street": STREET})
+    elif state["street"] == "turn":
+        state["board"].append(deck.pop())
+        state["street"] = "river"
 
-# =========================
-# 🧠 River（第5张）
-# =========================
-@app.route("/set_river")
-def set_river():
-
-    global BOARD, STREET
-
-    card = request.args.get("card","")
-
-    BOARD[4] = card
-    STREET = "river"
-
-    return jsonify({"board": BOARD, "street": STREET})
+    return jsonify(state)
 
 # =========================
-# 🌐 UI
+# 🌐 UI（极简不卡）
 # =========================
 @app.route("/")
 def home():
@@ -118,101 +86,64 @@ def home():
         background:#111;
         color:white;
         font-family:Arial;
+        text-align:center;
         padding:10px;
     }
 
-    input,select,button{
-        width:100%;
-        padding:10px;
-        margin:5px 0;
+    button{
+        width:90%;
+        padding:12px;
+        margin:5px;
     }
 
     .box{
         border:1px solid #444;
+        margin:8px;
         padding:8px;
-        margin:5px 0;
     }
 
-    .board{color:#00ffcc;}
-    .me{color:#ffd700;}
+    .board{color:#00ffcc;margin:10px;}
 
     </style>
     </head>
 
     <body>
 
-    <h2>🧠 德州（正确街道版）</h2>
+    <h3>🧠 德州模拟器（正常版）</h3>
 
-    <!-- 👥 玩家 -->
-    <input id="n" type="number" value="2" min="2" max="9">
-    <button onclick="setPlayers()">设置玩家</button>
-
-    <!-- 🎴 手牌 -->
-    <h3>我的手牌（2张）</h3>
-    <input id="h1">
-    <input id="h2">
-    <button onclick="setHand()">设置手牌</button>
-
-    <!-- 🌍 Flop -->
-    <h3>Flop（3张）</h3>
-    <input id="f1">
-    <input id="f2">
-    <input id="f3">
-    <button onclick="setFlop()">设置Flop</button>
-
-    <!-- Turn -->
-    <h3>Turn（1张）</h3>
-    <input id="t">
-    <button onclick="setTurn()">设置Turn</button>
-
-    <!-- River -->
-    <h3>River（1张）</h3>
-    <input id="r">
-    <button onclick="setRiver()">设置River</button>
+    <button onclick="start()">开始一局</button>
+    <button onclick="next()">下一街</button>
 
     <div class="board" id="board"></div>
-    <div class="me" id="me"></div>
+    <div id="players"></div>
 
     <script>
 
-    function setPlayers(){
-
-        let n=document.getElementById("n").value;
-
-        fetch("/set_players?n="+n).then(r=>r.json());
+    function start(){
+        let n=prompt("玩家人数 2-9");
+        fetch("/start?n="+n).then(r=>r.json()).then(d=>render(d));
     }
 
-    function setHand(){
-
-        let h=
-        document.getElementById("h1").value+" "+
-        document.getElementById("h2").value;
-
-        fetch("/set_hand?hand="+h).then(r=>r.json());
+    function next(){
+        fetch("/next").then(r=>r.json()).then(d=>render(d));
     }
 
-    function setFlop(){
+    function render(d){
 
-        let c=
-        document.getElementById("f1").value+" "+
-        document.getElementById("f2").value+" "+
-        document.getElementById("f3").value;
+        document.getElementById("board").innerText =
+        "街道：" + d.street + " | 公共牌：" + d.board.join(" ");
 
-        fetch("/set_flop?cards="+c).then(r=>r.json());
-    }
+        let html="";
 
-    function setTurn(){
+        d.players.forEach(p=>{
+            html+=`
+            <div class="box">
+                玩家 ${p.id}<br>
+                手牌：${p.hand.join(" ")}
+            </div>`;
+        });
 
-        let c=document.getElementById("t").value;
-
-        fetch("/set_turn?card="+c).then(r=>r.json());
-    }
-
-    function setRiver(){
-
-        let c=document.getElementById("r").value;
-
-        fetch("/set_river?card="+c).then(r=>r.json());
+        document.getElementById("players").innerHTML=html;
     }
 
     </script>
