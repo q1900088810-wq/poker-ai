@@ -5,98 +5,84 @@ app = Flask(__name__)
 POSITIONS = ["YOU","UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB"]
 
 # =========================
-# 🧠 全局状态
+# 🧠 多桌系统
 # =========================
-SEATS = 9
-TABLE = []
-BOARD = ["","","","",""]
+TABLES = {}
 
 # =========================
-# 🧠 创建桌子（按人数）
+# 🧠 创建单桌
 # =========================
-def create_table(n):
-    return [
-        {
-            "id": i,
-            "pos": POSITIONS[i],
-            "status": "active",
-            "hand": ""
-        }
-        for i in range(n)
-    ]
+def create_table(seats):
 
-TABLE = create_table(SEATS)
-
-# =========================
-# 🔄 重置开局
-# =========================
-@app.route("/reset")
-def reset():
-
-    global TABLE, BOARD
-
-    TABLE = create_table(SEATS)
-    BOARD = ["","","","",""]
-
-    return jsonify({"ok": True})
+    return {
+        "seats": seats,
+        "board": ["","","","",""],
+        "players": [
+            {
+                "id": i,
+                "pos": POSITIONS[i],
+                "status": "active",
+                "hand": ""
+            }
+            for i in range(seats)
+        ]
+    }
 
 # =========================
-# 👥 设置人数（2-9）
+# 🧠 初始化 N 张桌子（关键）
 # =========================
-@app.route("/set_seats")
-def set_seats():
+@app.route("/init_tables")
+def init_tables():
 
-    global SEATS, TABLE
+    n = int(request.args.get("n",2))
 
-    SEATS = int(request.args.get("n",9))
-    SEATS = max(2, min(9, SEATS))
+    TABLES.clear()
 
-    TABLE = create_table(SEATS)
+    for i in range(n):
+        TABLES[i] = create_table(9)  # 每桌默认9人
 
-    return jsonify({"seats": SEATS})
-
-# =========================
-# 🌍 设置公共牌（5张）
-# =========================
-@app.route("/set_board")
-def set_board():
-
-    global BOARD
-
-    cards = request.args.get("board","").split()
-
-    BOARD = (cards + ["","","","",""])[:5]
-
-    return jsonify({"board": BOARD})
+    return jsonify({
+        "tables": len(TABLES)
+    })
 
 # =========================
-# 🎯 玩家操作
+# 🧠 获取所有桌子
+# =========================
+@app.route("/get_tables")
+def get_tables():
+
+    return jsonify(TABLES)
+
+# =========================
+# 🧠 操作某一桌
 # =========================
 @app.route("/action")
 def action():
 
+    tid = int(request.args.get("table"))
     pid = int(request.args.get("id"))
     act = request.args.get("act")
 
-    if pid < len(TABLE):
+    table = TABLES.get(tid)
 
-        if act == "fold":
-            TABLE[pid]["status"] = "fold"
+    if not table:
+        return jsonify({"error":"no table"})
 
-        elif act == "call":
-            TABLE[pid]["status"] = "active"
+    player = table["players"][pid]
 
-        elif act == "raise":
-            TABLE[pid]["status"] = "active"
+    if act == "fold":
+        player["status"] = "fold"
 
-    return jsonify({
-        "table": TABLE,
-        "board": BOARD,
-        "seats": SEATS
-    })
+    elif act == "call":
+        player["status"] = "active"
+
+    elif act == "raise":
+        player["status"] = "active"
+
+    return jsonify(table)
 
 # =========================
-# 🌐 UI（干净版）
+# 🌐 UI（多桌）
 # =========================
 @app.route("/")
 def home():
@@ -114,139 +100,103 @@ def home():
         padding:10px;
     }
 
-    select,input,button{
+    input,button{
         width:90%;
         padding:10px;
         margin:5px;
-        font-size:14px;
+    }
+
+    .table{
+        border:1px solid #444;
+        margin:10px;
+        padding:10px;
+        border-radius:10px;
     }
 
     .grid{
         display:grid;
         grid-template-columns:repeat(3,1fr);
         gap:10px;
-        margin-top:10px;
     }
 
     .box{
-        border:1px solid #444;
-        padding:10px;
-        border-radius:10px;
+        border:1px solid #333;
+        padding:5px;
+        font-size:12px;
     }
-
-    .fold{color:red}
-
-    .board{
-        color:#00ffcc;
-        margin:10px;
-        font-size:16px;
-    }
-
-    .btn-red{background:#ff4444;color:white;border:0}
-    .btn-blue{background:#2196f3;color:white;border:0}
-    .btn-green{background:#00c853;color:white;border:0}
 
     </style>
     </head>
 
     <body>
 
-    <h2>🧠 德州牌桌（干净重构版）</h2>
+    <h2>🧠 多桌德州系统</h2>
 
-    <!-- 👥 人数 -->
-    <input id="seats" type="number" min="2" max="9" value="9">
-    <button class="btn-green" onclick="setSeats()">设置人数</button>
+    <!-- 🟣 创建桌子数量 -->
+    <input id="n" type="number" value="2" min="1" max="10">
+    <button onclick="init()">创建桌子</button>
 
-    <!-- 🔄 重置 -->
-    <button class="btn-red" onclick="reset()">重置开局</button>
-
-    <!-- 🌍 公共牌 -->
-    <h3>公共牌（5张）</h3>
-
-    <input id="b1">
-    <input id="b2">
-    <input id="b3">
-    <input id="b4">
-    <input id="b5">
-
-    <button class="btn-blue" onclick="setBoard()">设置公共牌</button>
-
-    <div class="board" id="board"></div>
-
-    <!-- 🟣 牌桌 -->
-    <div class="grid" id="table"></div>
+    <div id="root"></div>
 
     <script>
 
-    function render(d){
+    function init(){
 
-        document.getElementById("board").innerText =
-        "公共牌: " + d.board.join(" ");
+        let n=document.getElementById("n").value;
+
+        fetch(`/init_tables?n=${n}`)
+        .then(r=>r.json())
+        .then(()=>load());
+    }
+
+    function load(){
+
+        fetch("/get_tables")
+        .then(r=>r.json())
+        .then(data=>render(data));
+    }
+
+    function act(tid,pid,act){
+
+        fetch(`/action?table=${tid}&id=${pid}&act=${act}`)
+        .then(r=>r.json())
+        .then(()=>load());
+    }
+
+    function render(data){
 
         let html="";
 
-        d.table.forEach(p=>{
+        Object.keys(data).forEach(tid=>{
 
-            html+=`
-            <div class="box ${p.status=='fold'?'fold':''}">
-                <b>${p.pos}</b><br>
-                ${p.hand||"空"}<br>
-                状态:${p.status}<br>
+            let t=data[tid];
 
-                <button onclick="act(${p.id},'fold')">弃牌</button>
-                <button onclick="act(${p.id},'call')">跟注</button>
-                <button onclick="act(${p.id},'raise')">加注</button>
-            </div>`;
+            html+=`<div class='table'>
+                <h3>🟣 桌子 ${tid}（${t.seats}人）</h3>
+
+                <div class='grid'>`;
+
+            t.players.forEach(p=>{
+
+                html+=`
+                <div class='box'>
+                    <b>${p.pos}</b><br>
+                    ${p.hand||"空"}<br>
+                    ${p.status}<br>
+
+                    <button onclick="act(${tid},${p.id},'fold')">弃牌</button>
+                    <button onclick="act(${tid},${p.id},'call')">跟注</button>
+                    <button onclick="act(${tid},${p.id},'raise')">加注</button>
+                </div>`;
+            });
+
+            html+=`</div></div>`;
         });
 
-        document.getElementById("table").innerHTML=html;
+        document.getElementById("root").innerHTML=html;
     }
 
-    function setSeats(){
-
-        let n=document.getElementById("seats").value;
-
-        fetch(`/set_seats?n=${n}`)
-        .then(r=>r.json())
-        .then(()=>refresh());
-    }
-
-    function reset(){
-
-        fetch("/reset")
-        .then(r=>r.json())
-        .then(()=>refresh());
-    }
-
-    function setBoard(){
-
-        let b=
-        document.getElementById("b1").value+" "+
-        document.getElementById("b2").value+" "+
-        document.getElementById("b3").value+" "+
-        document.getElementById("b4").value+" "+
-        document.getElementById("b5").value;
-
-        fetch(`/set_board?board=${b}`)
-        .then(r=>r.json())
-        .then(()=>refresh());
-    }
-
-    function act(id,a){
-
-        fetch(`/action?id=${id}&act=${a}`)
-        .then(r=>r.json())
-        .then(d=>render(d));
-    }
-
-    function refresh(){
-
-        fetch("/action?id=0&act=none")
-        .then(r=>r.json())
-        .then(d=>render(d));
-    }
-
-    refresh();
+    load();
 
     </script>
 
