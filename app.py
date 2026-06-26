@@ -5,31 +5,27 @@ app = Flask(__name__)
 POSITIONS = ["YOU","UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB"]
 
 # =========================
-# 🧠 状态（单一牌局）
+# 🧠 单桌系统
 # =========================
 PLAYERS = []
 PLAYER_COUNT = 2
-
 BOARD = ["","","","",""]
 MY_HAND = ""
 
 # =========================
-# 🧠 创建玩家（关键）
+# 🧠 创建玩家（核心）
 # =========================
 def create_players(n):
 
-    players = []
-
-    for i in range(n):
-
-        players.append({
+    return [
+        {
             "id": i,
             "pos": POSITIONS[i],
             "status": "active",
             "hand": ""
-        })
-
-    return players
+        }
+        for i in range(n)
+    ]
 
 PLAYERS = create_players(PLAYER_COUNT)
 
@@ -39,7 +35,7 @@ PLAYERS = create_players(PLAYER_COUNT)
 @app.route("/set_players")
 def set_players():
 
-    global PLAYER_COUNT, PLAYERS
+    global PLAYERS, PLAYER_COUNT
 
     n = int(request.args.get("n",2))
     n = max(2, min(9, n))
@@ -63,7 +59,7 @@ def set_hand():
     return jsonify({"hand": MY_HAND})
 
 # =========================
-# 🧠 设置公共牌（5张）
+# 🧠 设置公共牌（5张固定）
 # =========================
 @app.route("/set_board")
 def set_board():
@@ -100,12 +96,11 @@ def action():
     return jsonify({
         "players": PLAYERS,
         "board": BOARD,
-        "my_hand": MY_HAND,
-        "count": PLAYER_COUNT
+        "my_hand": MY_HAND
     })
 
 # =========================
-# 🌐 UI（干净最终版）
+# 🌐 UI（单桌版本）
 # =========================
 @app.route("/")
 def home():
@@ -123,7 +118,7 @@ def home():
         padding:10px;
     }
 
-    select,input,button{
+    input,select,button{
         width:90%;
         padding:10px;
         margin:5px;
@@ -138,8 +133,8 @@ def home():
     .box{
         border:1px solid #444;
         padding:8px;
-        font-size:12px;
         border-radius:8px;
+        font-size:12px;
     }
 
     .board{color:#00ffcc;margin:10px;}
@@ -149,6 +144,8 @@ def home():
     </head>
 
     <body>
+
+    <h2>🧠 单桌德州（玩家可配置版）</h2>
 
     <!-- 👥 玩家数量 -->
     <h3>玩家数量 (2-9)</h3>
@@ -181,6 +178,7 @@ def home():
     let S=["♠","♥","♦","♣"];
 
     function build(id){
+
         let el=document.getElementById(id);
 
         R.forEach(r=>{
@@ -194,6 +192,7 @@ def home():
     }
 
     function initUI(){
+
         build("h1");build("h2");
         build("b1");build("b2");build("b3");build("b4");build("b5");
     }
