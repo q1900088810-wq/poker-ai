@@ -8,14 +8,13 @@ PLAYERS = []
 PLAYER_COUNT = 2
 
 MY_HAND = ["",""]
-BOARD = ["","","","",""]
+BOARD = []
 BET = {}
 
 # =========================
-# 🧠 玩家
+# 玩家
 # =========================
 def create_players(n):
-
     return [
         {
             "id": i,
@@ -29,7 +28,7 @@ def create_players(n):
 PLAYERS = create_players(PLAYER_COUNT)
 
 # =========================
-# 🧠 玩家数量
+# 设置玩家数量
 # =========================
 @app.route("/set_players")
 def set_players():
@@ -43,10 +42,10 @@ def set_players():
     PLAYERS = create_players(n)
     BET = {i:0 for i in range(n)}
 
-    return jsonify({"players": PLAYER_COUNT})
+    return jsonify({"ok": True})
 
 # =========================
-# 🧠 手牌（手动输入）
+# 手牌（你手动）
 # =========================
 @app.route("/set_hand")
 def set_hand():
@@ -55,10 +54,10 @@ def set_hand():
 
     MY_HAND = request.args.get("hand","").split()
 
-    return jsonify({"hand": MY_HAND})
+    return jsonify({"ok": True})
 
 # =========================
-# 🧠 公共牌（完全手动，无发牌）
+# 公共牌（完全手动）
 # =========================
 @app.route("/set_board")
 def set_board():
@@ -67,10 +66,10 @@ def set_board():
 
     BOARD = request.args.get("board","").split()
 
-    return jsonify({"board": BOARD})
+    return jsonify({"ok": True})
 
 # =========================
-# 🧠 下注系统
+# 下注系统
 # =========================
 @app.route("/bet")
 def bet():
@@ -97,12 +96,25 @@ def bet():
     return jsonify({
         "players": PLAYERS,
         "bets": BET,
-        "board": BOARD,
-        "hand": MY_HAND
+        "hand": MY_HAND,
+        "board": BOARD
     })
 
 # =========================
-# 🌐 UI（已去标题 + 极简）
+# 状态
+# =========================
+@app.route("/state")
+def state():
+
+    return jsonify({
+        "players": PLAYERS,
+        "hand": MY_HAND,
+        "board": BOARD,
+        "bets": BET
+    })
+
+# =========================
+# UI（无标题 + 极简）
 # =========================
 @app.route("/")
 def home():
@@ -125,7 +137,7 @@ def home():
         margin:5px 0;
     }
 
-    .card{
+    .box{
         border:1px solid #444;
         padding:8px;
         margin:5px 0;
@@ -133,27 +145,23 @@ def home():
     }
 
     .board{color:#00ffcc;margin:10px;}
-    .me{color:#ffd700;}
+    .hand{color:#ffd700;}
 
     </style>
     </head>
 
     <body>
 
-    <!-- 👥 玩家 -->
     <input id="n" type="number" value="2" min="2" max="9">
     <button onclick="setPlayers()">玩家数量</button>
 
-    <!-- 🎴 手牌 -->
     <input id="h1" placeholder="手牌1">
     <input id="h2" placeholder="手牌2">
     <button onclick="setHand()">设置手牌</button>
 
-    <!-- 🌍 公共牌 -->
     <input id="board" placeholder="公共牌（空格分隔）">
     <button onclick="setBoard()">设置公共牌</button>
 
-    <!-- 💰 下注 -->
     <input id="pid" placeholder="玩家ID">
     <input id="amt" placeholder="金额">
 
@@ -161,9 +169,10 @@ def home():
     <button onclick="raise()">加注</button>
     <button onclick="fold()">弃牌</button>
 
-    <div class="board" id="boardView"></div>
-    <div class="me" id="me"></div>
-    <div id="root"></div>
+    <div class="board" id="b"></div>
+    <div class="hand" id="h"></div>
+
+    <div id="p"></div>
 
     <script>
 
@@ -176,7 +185,7 @@ def home():
     }
 
     function setBoard(){
-        fetch("/set_board?board="+b().value);
+        fetch("/set_board?board="+board().value);
     }
 
     function call(){
@@ -191,12 +200,40 @@ def home():
         fetch(`/bet?id=${pid().value}&amount=0&act=fold`);
     }
 
+    function load(){
+        fetch("/state")
+        .then(r=>r.json())
+        .then(d=>{
+
+            document.getElementById("b").innerText =
+            "公共牌：" + d.board.join(" ");
+
+            document.getElementById("h").innerText =
+            "手牌：" + d.hand.join(" ");
+
+            let html="";
+
+            d.players.forEach(p=>{
+                html+=`
+                <div class="box">
+                    ${p.pos} | ${p.status} | ${p.bet}
+                </div>`;
+            });
+
+            document.getElementById("p").innerHTML=html;
+        });
+    }
+
+    setInterval(load,500);
+
     function n(){return document.getElementById("n");}
     function h1(){return document.getElementById("h1");}
     function h2(){return document.getElementById("h2");}
-    function b(){return document.getElementById("board");}
+    function board(){return document.getElementById("board");}
     function pid(){return document.getElementById("pid");}
     function amt(){return document.getElementById("amt");}
+
+    load();
 
     </script>
 
@@ -205,7 +242,7 @@ def home():
     """
 
 # =========================
-# 🚀 启动
+# 启动
 # =========================
-if __name__=="__main__":
-    app.run(host="0.0.0.0",port=10000)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
