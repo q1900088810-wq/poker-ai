@@ -2,10 +2,19 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-POSITIONS = ["UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB","BB"]
+# =========================
+# 🧠 9人桌：1个你 + 8个AI
+# =========================
+POSITIONS = ["YOU","UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB"]
 
+# =========================
+# 🧠 52张标准牌
+# =========================
 RANKS = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"]
 SUITS = ["♠","♥","♦","♣"]
+
+def deck():
+    return [r+s for r in RANKS for s in SUITS]
 
 # =========================
 # 🧠 状态
@@ -19,7 +28,7 @@ BOARD = ""
 MY_HAND = ""
 
 # =========================
-# 🧠 设置手牌（花色版）
+# 🧠 设置你的手牌（下拉选牌）
 # =========================
 @app.route("/set_hand")
 def set_hand():
@@ -30,7 +39,7 @@ def set_hand():
     return jsonify({"hand": MY_HAND})
 
 # =========================
-# 🧠 设置公共牌（花色版）
+# 🧠 设置公共牌（下拉选牌）
 # =========================
 @app.route("/set_board")
 def set_board():
@@ -51,8 +60,10 @@ def action():
 
     if act == "fold":
         TABLE[pid]["status"] = "fold"
+
     elif act == "call":
         TABLE[pid]["status"] = "active"
+
     elif act == "raise":
         TABLE[pid]["status"] = "active"
 
@@ -63,7 +74,7 @@ def action():
     })
 
 # =========================
-# 🌐 UI（核心修复：选牌器）
+# 🌐 UI（最终修复版）
 # =========================
 @app.route("/")
 def home():
@@ -118,38 +129,38 @@ def home():
 
     <body>
 
-    <h2>🧠 德州9人桌（花色选择版）</h2>
+    <h2>🧠 9人德州桌（最终稳定版）</h2>
 
+    <!-- 🟡 你的手牌（必须选牌） -->
     <h3>🎴 我的手牌</h3>
-
     <select id="h1"></select>
     <select id="h2"></select>
-
     <button onclick="setHand()">确认手牌</button>
 
+    <!-- 🟡 公共牌 -->
     <h3>🌍 公共牌</h3>
-
     <select id="b1"></select>
     <select id="b2"></select>
     <select id="b3"></select>
-
     <button onclick="setBoard()">确认公共牌</button>
 
     <div class="me" id="me">我的手牌：未设置</div>
     <div class="board" id="boardView">公共牌：未设置</div>
 
+    <!-- 🟣 9人桌 -->
     <div class="grid" id="table"></div>
 
     <script>
 
-    let ranks = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
-    let suits = ["♠","♥","♦","♣"];
+    let RANKS = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
+    let SUITS = ["♠","♥","♦","♣"];
 
-    function buildSelect(id){
-        let el = document.getElementById(id);
+    function makeDeck(selectId){
 
-        ranks.forEach(r=>{
-            suits.forEach(s=>{
+        let el = document.getElementById(selectId);
+
+        RANKS.forEach(r=>{
+            SUITS.forEach(s=>{
                 let opt = document.createElement("option");
                 opt.value = r+s;
                 opt.innerText = r+s;
@@ -159,12 +170,13 @@ def home():
     }
 
     function init(){
-        buildSelect("h1");
-        buildSelect("h2");
 
-        buildSelect("b1");
-        buildSelect("b2");
-        buildSelect("b3");
+        makeDeck("h1");
+        makeDeck("h2");
+
+        makeDeck("b1");
+        makeDeck("b2");
+        makeDeck("b3");
     }
 
     function setHand(){
