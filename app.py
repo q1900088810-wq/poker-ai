@@ -4,8 +4,11 @@ app = Flask(__name__)
 
 POSITIONS = ["UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB","BB"]
 
+RANKS = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"]
+SUITS = ["♠","♥","♦","♣"]
+
 # =========================
-# 🧠 状态（全局稳定）
+# 🧠 状态
 # =========================
 TABLE = [
     {"id": i, "pos": POSITIONS[i], "status": "active", "hand": ""}
@@ -16,7 +19,7 @@ BOARD = ""
 MY_HAND = ""
 
 # =========================
-# 🧠 设置你的手牌（不会丢）
+# 🧠 设置手牌（花色版）
 # =========================
 @app.route("/set_hand")
 def set_hand():
@@ -27,7 +30,7 @@ def set_hand():
     return jsonify({"hand": MY_HAND})
 
 # =========================
-# 🧠 设置公共牌（不会丢）
+# 🧠 设置公共牌（花色版）
 # =========================
 @app.route("/set_board")
 def set_board():
@@ -48,10 +51,8 @@ def action():
 
     if act == "fold":
         TABLE[pid]["status"] = "fold"
-
     elif act == "call":
         TABLE[pid]["status"] = "active"
-
     elif act == "raise":
         TABLE[pid]["status"] = "active"
 
@@ -62,7 +63,7 @@ def action():
     })
 
 # =========================
-# 🌐 UI（完全稳定版）
+# 🌐 UI（核心修复：选牌器）
 # =========================
 @app.route("/")
 def home():
@@ -80,10 +81,11 @@ def home():
         padding:10px;
     }
 
-    input{
+    select,button{
         width:90%;
         padding:10px;
         margin:5px;
+        font-size:14px;
     }
 
     .grid{
@@ -101,24 +103,13 @@ def home():
 
     .fold{color:red}
 
-    button{
-        margin:3px;
-        padding:6px;
-        font-size:12px;
-        background:#00c853;
-        border:0;
-        color:white;
-    }
-
     .board{
         margin-top:10px;
         color:#00ffcc;
-        font-size:16px;
     }
 
     .me{
         color:#ffd700;
-        font-size:18px;
         margin-top:10px;
     }
 
@@ -127,15 +118,22 @@ def home():
 
     <body>
 
-    <h2>🧠 9人德州交互牌桌（稳定版）</h2>
+    <h2>🧠 德州9人桌（花色选择版）</h2>
 
-    <!-- 🟡 永远存在：你的手牌 -->
-    <input id="hand" placeholder="我的手牌（如 A♠ K♠）">
-    <button onclick="setHand()">设置我的手牌</button>
+    <h3>🎴 我的手牌</h3>
 
-    <!-- 🟡 永远存在：公共牌 -->
-    <input id="board" placeholder="公共牌（如 Q♥ J♦ 10♣）">
-    <button onclick="setBoard()">设置公共牌</button>
+    <select id="h1"></select>
+    <select id="h2"></select>
+
+    <button onclick="setHand()">确认手牌</button>
+
+    <h3>🌍 公共牌</h3>
+
+    <select id="b1"></select>
+    <select id="b2"></select>
+    <select id="b3"></select>
+
+    <button onclick="setBoard()">确认公共牌</button>
 
     <div class="me" id="me">我的手牌：未设置</div>
     <div class="board" id="boardView">公共牌：未设置</div>
@@ -144,13 +142,66 @@ def home():
 
     <script>
 
-    function render(d){
+    let ranks = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
+    let suits = ["♠","♥","♦","♣"];
 
-        document.getElementById("boardView").innerText =
-        "公共牌：" + d.board;
+    function buildSelect(id){
+        let el = document.getElementById(id);
+
+        ranks.forEach(r=>{
+            suits.forEach(s=>{
+                let opt = document.createElement("option");
+                opt.value = r+s;
+                opt.innerText = r+s;
+                el.appendChild(opt);
+            });
+        });
+    }
+
+    function init(){
+        buildSelect("h1");
+        buildSelect("h2");
+
+        buildSelect("b1");
+        buildSelect("b2");
+        buildSelect("b3");
+    }
+
+    function setHand(){
+
+        let h = document.getElementById("h1").value + " " +
+                document.getElementById("h2").value;
+
+        fetch(`/set_hand?hand=${h}`)
+        .then(r=>r.json())
+        .then(()=>refresh());
+    }
+
+    function setBoard(){
+
+        let b = document.getElementById("b1").value + " " +
+                document.getElementById("b2").value + " " +
+                document.getElementById("b3").value;
+
+        fetch(`/set_board?board=${b}`)
+        .then(r=>r.json())
+        .then(()=>refresh());
+    }
+
+    function act(id,act){
+
+        fetch(`/action?id=${id}&act=${act}`)
+        .then(r=>r.json())
+        .then(d=>render(d));
+    }
+
+    function render(d){
 
         document.getElementById("me").innerText =
         "我的手牌：" + d.my_hand;
+
+        document.getElementById("boardView").innerText =
+        "公共牌：" + d.board;
 
         let html = "";
 
@@ -172,38 +223,13 @@ def home():
         document.getElementById("table").innerHTML = html;
     }
 
-    function setHand(){
-
-        let h = document.getElementById("hand").value;
-
-        fetch(`/set_hand?hand=${h}`)
-        .then(r=>r.json())
-        .then(()=>refresh());
-    }
-
-    function setBoard(){
-
-        let b = document.getElementById("board").value;
-
-        fetch(`/set_board?board=${b}`)
-        .then(r=>r.json())
-        .then(()=>refresh());
-    }
-
-    function act(id,act){
-
-        fetch(`/action?id=${id}&act=${act}`)
-        .then(r=>r.json())
-        .then(d=>render(d));
-    }
-
     function refresh(){
-
-        fetch(`/action?id=0&act=none`)
+        fetch("/action?id=0&act=none")
         .then(r=>r.json())
         .then(d=>render(d));
     }
 
+    init();
     refresh();
 
     </script>
