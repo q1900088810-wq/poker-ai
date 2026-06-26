@@ -1,36 +1,79 @@
 from flask import Flask, request, jsonify
+import random
 
 app = Flask(__name__)
 
 POSITIONS = ["YOU","UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB"]
 
 # =========================
-# 🧠 单桌系统
+# 🧠 真实牌库（52张）
 # =========================
+SUITS = ["♠","♥","♦","♣"]
+RANKS = ["A","K","Q","J","10","9","8","7","6","5","4","3","2"]
+
+DECK = []
 PLAYERS = []
-PLAYER_COUNT = 2
 BOARD = ["","","","",""]
-MY_HAND = ""
+PLAYER_COUNT = 2
 
 # =========================
-# 🧠 创建玩家（核心）
+# 🧠 生成牌库 + 洗牌
+# =========================
+def new_deck():
+    deck = [r+s for r in RANKS for s in SUITS]
+    random.shuffle(deck)
+    return deck
+
+DECK = new_deck()
+
+# =========================
+# 🧠 发牌（从真实牌库抽）
+# =========================
+def deal_card():
+    return DECK.pop() if DECK else ""
+
+# =========================
+# 🧠 创建玩家（自动发两张手牌）
 # =========================
 def create_players(n):
 
-    return [
-        {
+    global DECK
+
+    players = []
+
+    for i in range(n):
+
+        players.append({
             "id": i,
             "pos": POSITIONS[i],
             "status": "active",
-            "hand": ""
-        }
-        for i in range(n)
-    ]
+            "hand": [deal_card(), deal_card()]
+        })
+
+    return players
 
 PLAYERS = create_players(PLAYER_COUNT)
 
 # =========================
-# 🧠 设置玩家数量（2-9）
+# 🧠 重开局（核心功能）
+# =========================
+@app.route("/reset")
+def reset():
+
+    global DECK, PLAYERS, BOARD
+
+    DECK = new_deck()
+    BOARD = ["","","","",""]
+
+    PLAYERS = create_players(PLAYER_COUNT)
+
+    return jsonify({
+        "msg":"new game",
+        "deck_left": len(DECK)
+    })
+
+# =========================
+# 🧠 设置玩家数量
 # =========================
 @app.route("/set_players")
 def set_players():
@@ -41,33 +84,27 @@ def set_players():
     n = max(2, min(9, n))
 
     PLAYER_COUNT = n
+
+    DECK = new_deck()
     PLAYERS = create_players(n)
 
-    return jsonify({
-        "players": PLAYER_COUNT
-    })
+    return jsonify({"players": PLAYER_COUNT})
 
 # =========================
-# 🧠 设置手牌
+# 🧠 设置公共牌（从牌库发，不是手动输入）
 # =========================
-@app.route("/set_hand")
-def set_hand():
-
-    global MY_HAND
-    MY_HAND = request.args.get("hand","")
-
-    return jsonify({"hand": MY_HAND})
-
-# =========================
-# 🧠 设置公共牌（5张固定）
-# =========================
-@app.route("/set_board")
-def set_board():
+@app.route("/deal_board")
+def deal_board():
 
     global BOARD
 
-    cards = request.args.get("board","").split()
-    BOARD = (cards + ["","","","",""])[:5]
+    BOARD = [
+        deal_card(),
+        deal_card(),
+        deal_card(),
+        deal_card(),
+        deal_card()
+    ]
 
     return jsonify({"board": BOARD})
 
@@ -96,11 +133,11 @@ def action():
     return jsonify({
         "players": PLAYERS,
         "board": BOARD,
-        "my_hand": MY_HAND
+        "deck_left": len(DECK)
     })
 
 # =========================
-# 🌐 UI（单桌版本）
+# 🌐 UI（真实牌库版）
 # =========================
 @app.route("/")
 def home():
@@ -118,84 +155,43 @@ def home():
         padding:10px;
     }
 
-    input,select,button{
+    input,button{
         width:90%;
         padding:10px;
         margin:5px;
     }
 
-    .grid{
-        display:grid;
-        grid-template-columns:repeat(3,1fr);
-        gap:10px;
-    }
-
     .box{
         border:1px solid #444;
+        margin:5px;
         padding:8px;
         border-radius:8px;
-        font-size:12px;
     }
 
     .board{color:#00ffcc;margin:10px;}
-    .me{color:#ffd700;margin:10px;}
+    .hand{color:#ffd700;}
 
     </style>
     </head>
 
     <body>
 
-    <h2>🧠 单桌德州（玩家可配置版）</h2>
+    <h2>🧠 德州（真实牌库版）</h2>
 
-    <!-- 👥 玩家数量 -->
-    <h3>玩家数量 (2-9)</h3>
+    <!-- 👥 玩家 -->
     <input id="n" type="number" value="2" min="2" max="9">
-    <button onclick="setPlayers()">设置玩家</button>
+    <button onclick="setPlayers()">设置玩家 + 重发牌</button>
 
-    <!-- 🎴 手牌 -->
-    <h3>手牌</h3>
-    <select id="h1"></select>
-    <select id="h2"></select>
-    <button onclick="setHand()">设置手牌</button>
+    <!-- 🔄 重开局 -->
+    <button onclick="resetGame()">🔄 重开局</button>
 
     <!-- 🌍 公共牌 -->
-    <h3>公共牌（5张）</h3>
-    <select id="b1"></select>
-    <select id="b2"></select>
-    <select id="b3"></select>
-    <select id="b4"></select>
-    <select id="b5"></select>
-    <button onclick="setBoard()">设置公共牌</button>
+    <button onclick="dealBoard()">发公共牌（5张）</button>
 
-    <div class="me" id="me"></div>
     <div class="board" id="board"></div>
-
     <div id="root"></div>
 
     <script>
-
-    let R=["A","K","Q","J","10","9","8","7","6","5","4","3","2"];
-    let S=["♠","♥","♦","♣"];
-
-    function build(id){
-
-        let el=document.getElementById(id);
-
-        R.forEach(r=>{
-            S.forEach(s=>{
-                let o=document.createElement("option");
-                o.value=r+s;
-                o.innerText=r+s;
-                el.appendChild(o);
-            });
-        });
-    }
-
-    function initUI(){
-
-        build("h1");build("h2");
-        build("b1");build("b2");build("b3");build("b4");build("b5");
-    }
 
     function setPlayers(){
 
@@ -206,25 +202,16 @@ def home():
         .then(()=>load());
     }
 
-    function setHand(){
+    function resetGame(){
 
-        let h=document.getElementById("h1").value+" "+document.getElementById("h2").value;
-
-        fetch("/set_hand?hand="+h)
+        fetch("/reset")
         .then(r=>r.json())
         .then(()=>load());
     }
 
-    function setBoard(){
+    function dealBoard(){
 
-        let b=
-        document.getElementById("b1").value+" "+
-        document.getElementById("b2").value+" "+
-        document.getElementById("b3").value+" "+
-        document.getElementById("b4").value+" "+
-        document.getElementById("b5").value;
-
-        fetch("/set_board?board="+b)
+        fetch("/deal_board")
         .then(r=>r.json())
         .then(()=>load());
     }
@@ -238,9 +225,6 @@ def home():
 
     function render(d){
 
-        document.getElementById("me").innerText =
-        "我的手牌：" + d.my_hand;
-
         document.getElementById("board").innerText =
         "公共牌：" + d.board.join(" ");
 
@@ -249,9 +233,11 @@ def home():
         d.players.forEach(p=>{
 
             html+=`
-            <div class="box ${p.status=='fold'?'fold':''}">
-                ${p.pos}<br>
-                ${p.status}<br>
+            <div class="box">
+                <b>${p.pos}</b><br>
+
+                手牌：${p.hand.join(" ")}<br>
+                状态：${p.status}<br>
 
                 <button onclick="act(${p.id},'fold')">弃牌</button>
                 <button onclick="act(${p.id},'call')">跟注</button>
@@ -268,7 +254,6 @@ def home():
         .then(d=>render(d));
     }
 
-    initUI();
     load();
 
     </script>
