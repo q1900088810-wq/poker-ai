@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+<style>
+
+body{
+    margin:0;
+    background:#0b1a14;
+    font-family:Arial;
+    color:white;
+}
+
+.table{
+    width:92vw;
+    height:60vw;
+    margin:20px auto;
+    background:radial-gradient(ellipse,#1f4d3a,#07130f);
+    border-radius:50% / 42%;
+    position:relative;
+}
+
+.pot{
+    position:absolute;
+    top:45%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    font-size:16px;
+}
+
+.players{
+    position:absolute;
+    bottom:10px;
+    left:50%;
+    transform:translateX(-50%);
+}
+
+button{
+    padding:10px;
+    margin:5px;
+    border:none;
+    border-radius:8px;
+    background:#1f2a36;
+    color:white;
+}
+
+</style>
+</head>
+
+<body>
+
+<h3 style="text-align:center;">实时德州（WebSocket）</h3>
+
+<div class="table">
+
+    <div class="pot" id="pot">Pot: 0</div>
+
+    <div class="players" id="players"></div>
+
+</div>
+
+<div style="text-align:center;">
+<button onclick="bet()">下注 +100</button>
+<button onclick="fold()">弃牌</button>
+</div>
+
+<script>
+
+const socket = io();
+
+let myId = "P" + Math.floor(Math.random()*1000);
+
+// 🟢 加入游戏
+socket.emit("join", {
+    id: myId,
+    name: "You"
+});
+
+// 🟢 接收状态
+socket.on("state", (game)=>{
+
+    document.getElementById("pot").innerText =
+        "Pot: " + game.pot;
+
+    let html = "";
+
+    for(let id in game.players){
+        let p = game.players[id];
+
+        html += `
+            <div>
+                ${p.name} |
+                stack:${p.stack} |
+                bet:${p.bet}
+            </div>
+        `;
+    }
+
+    document.getElementById("players").innerHTML = html;
+});
+
+// 💰 下注
+function bet(){
+    socket.emit("bet", {
+        id: myId,
+        amount: 100
+    });
+}
+
+// ❌ 弃牌
+function fold(){
+    socket.emit("fold", {
+        id: myId
+    });
+}
+
+</script>
+
+</body>
+</html>
