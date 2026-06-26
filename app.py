@@ -4,42 +4,32 @@ app = Flask(__name__)
 
 POSITIONS = ["YOU","UTG","UTG+1","MP","MP+1","HJ","CO","BTN","SB"]
 
-# =========================
-# 🧠 状态
-# =========================
 PLAYERS = []
 PLAYER_COUNT = 2
 
 MY_HAND = ["",""]
-
-BOARD = ["","","","",""]  # flop 0-2, turn 3, river 4
-
-BET = {}  # 每个玩家下注
-
-STREET = "preflop"
+BOARD = ["","","","",""]
+BET = {}
 
 # =========================
-# 🧠 创建玩家
+# 🧠 玩家
 # =========================
 def create_players(n):
 
-    players = []
-
-    for i in range(n):
-
-        players.append({
+    return [
+        {
             "id": i,
             "pos": POSITIONS[i],
             "status": "active",
             "bet": 0
-        })
-
-    return players
+        }
+        for i in range(n)
+    ]
 
 PLAYERS = create_players(PLAYER_COUNT)
 
 # =========================
-# 🧠 设置玩家数量
+# 🧠 玩家数量
 # =========================
 @app.route("/set_players")
 def set_players():
@@ -51,13 +41,12 @@ def set_players():
 
     PLAYER_COUNT = n
     PLAYERS = create_players(n)
-
     BET = {i:0 for i in range(n)}
 
     return jsonify({"players": PLAYER_COUNT})
 
 # =========================
-# 🧠 手牌（你选）
+# 🧠 手牌（手动输入）
 # =========================
 @app.route("/set_hand")
 def set_hand():
@@ -69,53 +58,19 @@ def set_hand():
     return jsonify({"hand": MY_HAND})
 
 # =========================
-# 🧠 Flop（3张）
+# 🧠 公共牌（完全手动，无发牌）
 # =========================
-@app.route("/set_flop")
-def set_flop():
+@app.route("/set_board")
+def set_board():
 
-    global BOARD, STREET
+    global BOARD
 
-    cards = request.args.get("cards","").split()
+    BOARD = request.args.get("board","").split()
 
-    BOARD[0:3] = (cards + ["","",""])[:3]
-
-    STREET = "flop"
-
-    return jsonify({"board": BOARD[:3], "street": STREET})
+    return jsonify({"board": BOARD})
 
 # =========================
-# 🧠 Turn
-# =========================
-@app.route("/set_turn")
-def set_turn():
-
-    global BOARD, STREET
-
-    card = request.args.get("card","")
-
-    BOARD[3] = card
-    STREET = "turn"
-
-    return jsonify({"board": BOARD[:4], "street": STREET})
-
-# =========================
-# 🧠 River
-# =========================
-@app.route("/set_river")
-def set_river():
-
-    global BOARD, STREET
-
-    card = request.args.get("card","")
-
-    BOARD[4] = card
-    STREET = "river"
-
-    return jsonify({"board": BOARD, "street": STREET})
-
-# =========================
-# 🧠 下注系统（核心）
+# 🧠 下注系统
 # =========================
 @app.route("/bet")
 def bet():
@@ -132,23 +87,22 @@ def bet():
             p["status"] = "fold"
 
         elif act == "call":
-            BET[pid] = amount
             p["status"] = "call"
+            p["bet"] = amount
 
         elif act == "raise":
-            BET[pid] = amount
             p["status"] = "raise"
+            p["bet"] = amount
 
     return jsonify({
         "players": PLAYERS,
         "bets": BET,
         "board": BOARD,
-        "hand": MY_HAND,
-        "street": STREET
+        "hand": MY_HAND
     })
 
 # =========================
-# 🌐 UI（简洁不炸屏）
+# 🌐 UI（已去标题 + 极简）
 # =========================
 @app.route("/")
 def home():
@@ -186,35 +140,20 @@ def home():
 
     <body>
 
-    <h3>🧠 德州手动模拟系统（完整规则版）</h3>
-
     <!-- 👥 玩家 -->
     <input id="n" type="number" value="2" min="2" max="9">
-    <button onclick="setPlayers()">设置玩家</button>
+    <button onclick="setPlayers()">玩家数量</button>
 
     <!-- 🎴 手牌 -->
-    <h3>我的手牌</h3>
-    <input id="h1">
-    <input id="h2">
+    <input id="h1" placeholder="手牌1">
+    <input id="h2" placeholder="手牌2">
     <button onclick="setHand()">设置手牌</button>
 
-    <!-- 🌍 Flop -->
-    <h3>Flop（3张）</h3>
-    <input id="f">
-    <button onclick="setFlop()">设置Flop</button>
-
-    <!-- Turn -->
-    <h3>Turn</h3>
-    <input id="t">
-    <button onclick="setTurn()">设置Turn</button>
-
-    <!-- River -->
-    <h3>River</h3>
-    <input id="r">
-    <button onclick="setRiver()">设置River</button>
+    <!-- 🌍 公共牌 -->
+    <input id="board" placeholder="公共牌（空格分隔）">
+    <button onclick="setBoard()">设置公共牌</button>
 
     <!-- 💰 下注 -->
-    <h3>下注</h3>
     <input id="pid" placeholder="玩家ID">
     <input id="amt" placeholder="金额">
 
@@ -222,52 +161,42 @@ def home():
     <button onclick="raise()">加注</button>
     <button onclick="fold()">弃牌</button>
 
-    <div class="board" id="board"></div>
+    <div class="board" id="boardView"></div>
     <div class="me" id="me"></div>
     <div id="root"></div>
 
     <script>
 
     function setPlayers(){
-        fetch("/set_players?n="+document.getElementById("n").value);
+        fetch("/set_players?n="+n().value);
     }
 
     function setHand(){
-        let h=document.getElementById("h1").value+" "+document.getElementById("h2").value;
-        fetch("/set_hand?hand="+h);
+        fetch("/set_hand?hand="+h1().value+" "+h2().value);
     }
 
-    function setFlop(){
-        fetch("/set_flop?cards="+document.getElementById("f").value);
-    }
-
-    function setTurn(){
-        fetch("/set_turn?card="+document.getElementById("t").value);
-    }
-
-    function setRiver(){
-        fetch("/set_river?card="+document.getElementById("r").value);
+    function setBoard(){
+        fetch("/set_board?board="+b().value);
     }
 
     function call(){
-        fetch(`/bet?id=${pid().id}&amount=${amt()}&act=call`);
+        fetch(`/bet?id=${pid().value}&amount=${amt().value}&act=call`);
     }
 
     function raise(){
-        fetch(`/bet?id=${pid().id}&amount=${amt()}&act=raise`);
+        fetch(`/bet?id=${pid().value}&amount=${amt().value}&act=raise`);
     }
 
     function fold(){
-        fetch(`/bet?id=${pid().id}&amount=0&act=fold`);
+        fetch(`/bet?id=${pid().value}&amount=0&act=fold`);
     }
 
-    function pid(){
-        return {id:document.getElementById("pid").value};
-    }
-
-    function amt(){
-        return document.getElementById("amt").value;
-    }
+    function n(){return document.getElementById("n");}
+    function h1(){return document.getElementById("h1");}
+    function h2(){return document.getElementById("h2");}
+    function b(){return document.getElementById("board");}
+    function pid(){return document.getElementById("pid");}
+    function amt(){return document.getElementById("amt");}
 
     </script>
 
